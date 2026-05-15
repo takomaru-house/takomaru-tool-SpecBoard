@@ -1,0 +1,21 @@
+{
+  "name": "custom-house-management",
+  "version": "0.1.0-sprint0",
+  "private": true,
+  "type": "module",
+  "description": "注文住宅管理ツール (Spec.md v3.0)",
+  "scripts": {
+    "test": "vitest run",
+    "test:unit": "vitest run __tests__/unit",
+    "test:integration": "vitest run __tests__/integration",
+    "test:watch": "vitest --watch",
+    "test:coverage": "vitest run --coverage",
+    "test:sprint0": "vitest run __tests__/unit/storage.test.js __tests__/unit/migration.test.js",
+    "preview": "npx serve ."
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^1.6.0",
+    "jsdom": "^24.1.0",
+    "vitest": "^1.6.0"
+  }
+}

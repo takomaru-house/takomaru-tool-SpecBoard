@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>注文住宅管理ツール – ローカルプレビュー (Sprint 0)</title>
+  <!-- Tailwind CSS (CDN) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Google Fonts: Noto Sans JP / Noto Serif JP / Cormorant Garamond / JetBrains Mono
+       参考デザイン: https://inumaru-kazuya.github.io/takomaruHP/ -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+JP:wght@400;500;600;700&family=Noto+Serif+JP:wght@500;600;700&display=swap">
+  <!-- React 18 (CDN) -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <!-- Babel Standalone for in-browser JSX transformation -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    body { margin: 0; background: #faf8f3; color: #1a1816;
+           font-family: "Noto Sans JP", system-ui, -apple-system, "Segoe UI", sans-serif; }
+    .sr-only {
+      position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+      overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+    }
+    /* Sprint 0 デバッグツールバー (preview.html 限定・画面上部に固定)
+       モバイル時にアプリのボトムナビ (fixed bottom-0) を覆わないように top に配置 */
+    #__sprint0_devbar {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 9999;
+      background: #1e293b; color: #e2e8f0; padding: 6px 12px;
+      font-size: 11px; display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
+      border-bottom: 2px solid #38bdf8;
+      transition: transform 200ms ease;
+    }
+    #__sprint0_devbar.collapsed {
+      transform: translateY(calc(-100% + 28px));
+    }
+    #__sprint0_devbar button {
+      background: #334155; color: #e2e8f0; border: 1px solid #475569;
+      padding: 3px 8px; border-radius: 3px; cursor: pointer; font-size: 11px;
+    }
+    #__sprint0_devbar button:hover { background: #475569; }
+    #__sprint0_devbar .label { color: #94a3b8; }
+    #__sprint0_devbar .toggle {
+      margin-left: auto;
+      background: #0ea5e9; color: white; border: none;
+      padding: 3px 10px; border-radius: 3px; cursor: pointer; font-size: 11px;
+    }
+    /* デバッグバー (約36px) の高さ分だけアプリ全体を下にずらす */
+    body { padding-top: 40px; }
+    /* アプリ本体の sticky ヘッダーが devbar に隠れないように調整 */
+    #root > div > header { top: 40px !important; }
+  </style>
+</head>
+<body>
+  <!-- preview.html 用 window.storage モック (Promise版・localStorage バック) -->
+  <script>
+    (function installStorageMock() {
+      const PREFIX = "__sprint0_preview__::";
+      const MODE_KEY = "__sprint0_preview_mode__";
+      let mode = sessionStorage.getItem(MODE_KEY) || "window.storage";
+
+      const realLocal = {
+        getItem: localStorage.getItem.bind(localStorage),
+        setItem: localStorage.setItem.bind(localStorage),
+        removeItem: localStorage.removeItem.bind(localStorage),
+      };
+
+      function makeWindowStorage() {
+        return {
+          getItem: async (key) => {
+            if (mode === "broken-window" || mode === "broken-all") {
+              throw new Error("Simulated window.storage failure");
+            }
+            return realLocal.getItem(PREFIX + key);
+          },
+          setItem: async (key, value) => {
+            if (mode === "broken-window" || mode === "broken-all") {
+              throw new Error("Simulated window.storage failure");
+            }
+            realLocal.setItem(PREFIX + key, value);
+          },
+          removeItem: async (key) => {
+            if (mode === "broken-window" || mode === "broken-all") {
+              throw new Error("Simulated window.storage failure");
+            }
+            realLocal.removeItem(PREFIX + key);
+          },
+        };
+      }
+
+      window.storage = makeWindowStorage();
+
+      function applyBrokenLocal() {
+        localStorage.setItem = () => { throw new Error("Simulated localStorage failure"); };
+        localStorage.getItem = () => { throw new Error("Simulated localStorage failure"); };
+        localStorage.removeItem = () => { throw new Error("Simulated localStorage failure"); };
+      }
+      if (mode === "broken-all") applyBrokenLocal();
+
+      window.__storageController = {
+        setMode(next) {
+          sessionStorage.setItem(MODE_KEY, next);
+          console.log("[Storage Mock] next reload mode =", next);
+        },
+        clearAll() {
+          const keys = [];
+          for (let i = 0; i < realLocal.getItem.length; i++) {}
+          for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (k && k.startsWith(PREFIX)) keys.push(k);
+          }
+          keys.forEach((k) => realLocal.removeItem(k));
+          console.log(`[Storage Mock] cleared ${keys.length} keys`);
+        },
+        dump() {
+          const entries = {};
+          for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (k && k.startsWith(PREFIX)) entries[k.replace(PREFIX, "")] = realLocal.getItem(k);
+          }
+          console.table(entries);
+          return entries;
+        },
+        currentMode() { return mode; },
+      };
+
+      console.log(`✅ window.storage モック準備完了 (現在モード: ${mode})`);
+    })();
+  </script>
+
+  <div id="root"></div>
+
+  <!-- Sprint 0 制御パネル (preview.html のみ・画面上部・折りたたみ可)
+       モバイル時にアプリのボトムナビを覆わないように画面上部に配置 -->
+  <div id="__sprint0_devbar">
+    <span class="label">🛠 Sprint 0 制御:</span>
+    <button onclick="window.__storageController.setMode('window.storage'); location.reload();">
+      ① 正常
+    </button>
+    <button onclick="window.__storageController.setMode('broken-window'); location.reload();">
+      ② localStorage フォールバック
+    </button>
+    <button onclick="window.__storageController.setMode('broken-all'); location.reload();">
+      ③ 書き込み不能
+    </button>
+    <button onclick="window.__storageController.clearAll(); location.reload();">
+      🗑 クリア
+    </button>
+    <button onclick="window.__storageController.dump();">
+      📤 ダンプ
+    </button>
+    <span id="__current_mode" class="label"></span>
+    <button class="toggle" onclick="document.getElementById('__sprint0_devbar').classList.toggle('collapsed')">
+      ▲ 隠す
+    </button>
+  </div>
+
+  <!-- app.jsx を fetch して JSX→JS 変換、export default App をグローバル化して mount -->
+  <script type="text/javascript">
+    (async function bootstrap() {
+      const root = document.getElementById("root");
+      const modeLabel = document.getElementById("__current_mode");
+      modeLabel.textContent = "現在モード: " + window.__storageController.currentMode();
+
+      try {
+        const src = await fetch("./app.jsx").then((r) => {
+          if (!r.ok) throw new Error(`fetch失敗: ${r.status}`);
+          return r.text();
+        });
+        const transformed = src
+          .replace(/^\s*export\s+default\s+App\s*;?\s*$/m, "window.App = App;");
+        const code = Babel.transform(transformed, { presets: ["env", "react"] }).code;
+        // eslint-disable-next-line no-new-func
+        new Function(code)();
+        if (typeof window.App !== "function") {
+          throw new Error("window.App が定義されませんでした。app.jsx の末尾の export default App を確認してください。");
+        }
+        ReactDOM.createRoot(root).render(React.createElement(window.App));
+      } catch (e) {
+        console.error("Bootstrap 失敗:", e);
+        root.innerHTML =
+          `<div style="padding:24px;color:#dc2626;font-family:monospace;line-height:1.6;">
+            <strong>⚠️ 初期化エラー</strong><br/>
+            ${e.message}<br/><br/>
+            <strong>解決方法:</strong> file:// では fetch が制限されるため、ローカルHTTPサーバーが必要です。<br/><br/>
+            <code style="background:#f1f5f9;color:#0f172a;padding:8px;display:block;white-space:pre;">PowerShell:
+  cd "D:\\51-注文住宅管理ツール"
+  python -m http.server 8080
+  # ブラウザで http://localhost:8080/preview.html を開く
+
+Node がインストールされていれば:
+  cd "D:\\51-注文住宅管理ツール"
+  npx serve .
+  # 表示された URL の /preview.html を開く</code>
+          </div>`;
+      }
+    })();
+  </script>
+</body>
+</html>
