@@ -3819,15 +3819,485 @@ export function ChangeLogsView() {
   );
 }
 
-// ===== 8. ダッシュボード =====
-// Sprint 5 で実装
+// ===== 8. ダッシュボード + 全文検索 =====
+
+// ---- Sprint 5 内部ユーティリティ (src/utils/dashboard.js / search.js のミラー) ----
+
+const SEARCH_TARGETS_INLINE = {
+  Meeting:  ["agenda", "summary", "location"],
+  Decision: ["content", "note", "specValue"],
+  SpecItem: ["name"],
+  Company:  ["name", "contact", "note"],
+};
+
+function computeSummaryInline({ companies = [], meetings = [], decisions = [] }) {
+  const active = companies.filter((c) => !c.deletedAt);
+  const byStatus = (s) => active.filter((c) => c.status === s).length;
+  return {
+    considering: byStatus("considering"),
+    candidate:   byStatus("candidate"),
+    contracted:  byStatus("contracted"),
+    rejected:    byStatus("rejected"),
+    meetingCount: meetings.filter((m) => !m.deletedAt).length,
+    pendingCount: decisions.filter((d) => !d.deletedAt && d.status === "pending").length,
+    activeCompanyCount: active.length,
+  };
+}
+
+function hasActiveCandidatesInline(companies) {
+  return companies.filter((c) => !c.deletedAt)
+    .some((c) => c.status === "considering" || c.status === "candidate");
+}
+
+function recentMeetingsInline(meetings, limit = 5) {
+  return [...meetings]
+    .filter((m) => !m.deletedAt)
+    .sort((a, b) => {
+      const ax = a.date || ""; const bx = b.date || "";
+      if (ax === bx) return (b.createdAt || "").localeCompare(a.createdAt || "");
+      return bx.localeCompare(ax);
+    })
+    .slice(0, limit);
+}
+
+function recentDecisionsInline(decisions, limit = 5) {
+  return decisions
+    .filter((d) => !d.deletedAt)
+    .slice()
+    .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""))
+    .slice(0, limit);
+}
+
+function pendingActionsInline(decisions, limit = 50) {
+  return decisions
+    .filter((d) => !d.deletedAt && d.status === "pending")
+    .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""))
+    .slice(0, limit);
+}
+
+function normalizeSearch(s) { return String(s ?? "").toLowerCase(); }
+
+function fieldMatchesSearch(entity, fields, q) {
+  return fields.some((f) => normalizeSearch(entity[f]).includes(q));
+}
+
+function runGlobalSearchInline({ meetings = [], decisions = [], specItems = [], companies = [] }, query) {
+  const q = normalizeSearch(query);
+  if (q.length === 0) {
+    return { meetings: [], decisions: [], specItems: [], companies: [], totalCount: 0 };
+  }
+  const mm = meetings.filter((e) => !e.deletedAt && fieldMatchesSearch(e, SEARCH_TARGETS_INLINE.Meeting, q));
+  const md = decisions.filter((e) => !e.deletedAt && fieldMatchesSearch(e, SEARCH_TARGETS_INLINE.Decision, q));
+  const ms = specItems.filter((e) => !e.deletedAt && fieldMatchesSearch(e, SEARCH_TARGETS_INLINE.SpecItem, q));
+  const mc = companies.filter((e) => !e.deletedAt && fieldMatchesSearch(e, SEARCH_TARGETS_INLINE.Company, q));
+  return {
+    meetings: mm, decisions: md, specItems: ms, companies: mc,
+    totalCount: mm.length + md.length + ms.length + mc.length,
+  };
+}
+
+function splitForHighlightInline(text, query) {
+  const s = String(text ?? ""); const q = String(query ?? "");
+  if (q.length === 0 || s.length === 0) return [{ text: s, match: false }];
+  const lower = s.toLowerCase(); const lq = q.toLowerCase();
+  const out = []; let i = 0;
+  while (i < s.length) {
+    const idx = lower.indexOf(lq, i);
+    if (idx === -1) { out.push({ text: s.slice(i), match: false }); break; }
+    if (idx > i) out.push({ text: s.slice(i, idx), match: false });
+    out.push({ text: s.slice(idx, idx + q.length), match: true });
+    i = idx + q.length;
+  }
+  return out;
+}
+
+// ---- ハイライト表示用コンポーネント ----
+
+function Highlight({ text, query }) {
+  const segments = splitForHighlightInline(text, query);
+  return (
+    <>
+      {segments.map((seg, i) =>
+        seg.match
+          ? <mark key={i} className="bg-wood/40 text-ink rounded px-0.5">{seg.text}</mark>
+          : <React.Fragment key={i}>{seg.text}</React.Fragment>
+      )}
+    </>
+  );
+}
+
+// ---- ダッシュボードビュー ----
+
+const SUMMARY_CARDS = [
+  { key: "considering",  label: "検討中",       targetTab: "companies",       filter: "considering" },
+  { key: "candidate",    label: "候補",         targetTab: "companies",       filter: "candidate" },
+  { key: "meetingCount", label: "打ち合わせ",   targetTab: "meetings",        filter: "all" },
+  { key: "pendingCount", label: "未確定事項",   targetTab: "meetings",        filter: "all" },
+];
+
+export function DashboardView({ onNavigate }) {
+  const [companies, setCompanies] = useState(null);
+  const [meetings, setMeetings] = useState([]);
+  const [decisions, setDecisions] = useState([]);
+
+  const reload = useCallback(async () => {
+    setCompanies(await loadCompaniesFromStorage());
+    setMeetings(await loadMeetingsFromStorage());
+    setDecisions(await loadDecisionsFromStorage());
+  }, []);
+
+  useEffect(() => { reload(); }, [reload]);
+
+  if (companies === null) return <Spinner label="ダッシュボードを読み込み中..." />;
+
+  const summary = computeSummaryInline({ companies, meetings, decisions });
+  const active = companies.filter((c) => !c.deletedAt);
+  const hasCandidates = hasActiveCandidatesInline(companies);
+
+  // 会社0件 → CTA Empty State
+  if (active.length === 0) {
+    return (
+      <EmptyState
+        icon="🏠"
+        title="まず会社を登録してはじめましょう"
+        description="ハウスメーカー・工務店を登録すると、打ち合わせと仕様比較の管理を開始できます。"
+        action={{
+          label: "会社を登録する",
+          onClick: () => onNavigate?.("companies"),
+          testId: "dashboard-cta-add-company",
+        }}
+        testId="dashboard-empty-no-companies"
+      />
+    );
+  }
+
+  // 全社落選/契約済み → E13
+  if (!hasCandidates) {
+    return (
+      <EmptyState
+        icon="🌿"
+        title="現在候補会社がありません"
+        description="検討中・候補ステータスの会社がありません。新しい候補を追加するか、既存の会社のステータスを変更してください。"
+        action={{
+          label: "会社を登録する",
+          onClick: () => onNavigate?.("companies"),
+          testId: "dashboard-e13-cta",
+        }}
+        testId="dashboard-no-active-candidates"
+      />
+    );
+  }
+
+  const recent5Meetings = recentMeetingsInline(meetings, 5);
+  const recent5Decisions = recentDecisionsInline(decisions, 5);
+  const pending = pendingActionsInline(decisions);
+
+  const findCompany = (id) => companies.find((c) => c.id === id);
+  const findMeeting = (id) => meetings.find((m) => m.id === id);
+
+  return (
+    <div data-testid="dashboard-view">
+      <div className="mb-6">
+        <h2 className="text-xl text-ink" style={{ fontFamily: "var(--jp-serif)", fontWeight: 600 }}>
+          ダッシュボード
+        </h2>
+        <p className="font-serif-en text-[11px] uppercase tracking-widest text-wood-deep mt-1">
+          Overview
+        </p>
+      </div>
+
+      {/* サマリーカード */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8" data-testid="dashboard-summary">
+        {SUMMARY_CARDS.map((card) => {
+          const value = summary[card.key];
+          return (
+            <button key={card.key} type="button"
+              data-testid={`summary-card-${card.key}`}
+              onClick={() => onNavigate?.(card.targetTab, { statusFilter: card.filter })}
+              className="bg-paper border border-rule rounded-2xl p-5 text-left hover:border-wood-deep transition focus-visible:outline focus-visible:outline-2 ring-rust">
+              <p className="font-serif-en text-[10px] uppercase tracking-widest text-wood-deep">
+                {card.label}
+              </p>
+              <p className="mt-2 text-3xl text-ink font-mono" data-testid={`summary-value-${card.key}`}>
+                {value}
+              </p>
+              <p className="mt-1 text-[10px] text-ink-soft">
+                {card.key === "meetingCount" ? "回" : card.key === "pendingCount" ? "件" : "社"}
+              </p>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Pending Actions */}
+      <section className="mb-8">
+        <div className="flex items-baseline justify-between mb-3">
+          <h3 className="text-base text-ink" style={{ fontFamily: "var(--jp-serif)", fontWeight: 600 }}>
+            ⚠ アクションが必要な項目
+          </h3>
+          <span className="font-serif-en text-[10px] uppercase tracking-widest text-wood-deep">
+            Pending / {pending.length}
+          </span>
+        </div>
+        {pending.length === 0 ? (
+          <p className="text-xs text-ink-soft text-center py-4 border border-dashed border-rule rounded-xl">
+            未確定の決定事項はありません
+          </p>
+        ) : (
+          <div className="space-y-2" data-testid="pending-action-list">
+            {pending.slice(0, 5).map((d) => {
+              const meeting = findMeeting(d.meetingId);
+              const company = meeting ? findCompany(meeting.companyId) : undefined;
+              return (
+                <div key={d.id} className="bg-paper border border-rule rounded-xl p-3 flex items-start gap-3"
+                     data-testid={`pending-item-${d.id}`}>
+                  <DecisionStatusBadge status={d.status} testId={`pending-status-${d.id}`} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-ink truncate">{d.content}</p>
+                    <p className="text-[11px] text-ink-soft mt-0.5">
+                      {company ? company.name : "[削除済み会社]"}
+                      {meeting && <> <span className="opacity-50 mx-1">·</span> <span className="font-mono">{meeting.date}</span></>}
+                    </p>
+                  </div>
+                  {meeting && (
+                    <button type="button"
+                      data-testid={`pending-go-meeting-${d.id}`}
+                      onClick={() => onNavigate?.("meetings", { meetingId: meeting.id })}
+                      className="text-[11px] px-3 py-1 rounded-full border border-rule text-ink-soft hover:text-ink whitespace-nowrap">
+                      確認する →
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      {/* 直近の打ち合わせ + 決定事項 */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <section>
+          <div className="flex items-baseline justify-between mb-3">
+            <h3 className="text-base text-ink" style={{ fontFamily: "var(--jp-serif)", fontWeight: 600 }}>
+              📅 直近の打ち合わせ
+            </h3>
+            <button type="button" onClick={() => onNavigate?.("meetings")}
+              data-testid="recent-meetings-see-all"
+              className="text-[11px] text-ink-soft hover:text-ink">
+              全件を見る →
+            </button>
+          </div>
+          {recent5Meetings.length === 0 ? (
+            <p className="text-xs text-ink-soft text-center py-4 border border-dashed border-rule rounded-xl">
+              打ち合わせ記録がありません
+            </p>
+          ) : (
+            <ul className="space-y-2" data-testid="recent-meetings-list">
+              {recent5Meetings.map((m) => {
+                const co = findCompany(m.companyId);
+                return (
+                  <li key={m.id}>
+                    <button type="button"
+                      data-testid={`recent-meeting-${m.id}`}
+                      onClick={() => onNavigate?.("meetings", { meetingId: m.id })}
+                      className="w-full text-left bg-paper border border-rule rounded-xl p-3 hover:border-wood-deep transition">
+                      <p className="text-sm text-ink truncate" style={{ fontFamily: "var(--jp-serif)", fontWeight: 600 }}>
+                        {m.title}
+                      </p>
+                      <p className="text-[11px] text-ink-soft mt-0.5">
+                        <span className="font-mono">{m.date}</span>
+                        {co && <> <span className="opacity-50 mx-1">·</span> {co.name}</>}
+                      </p>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
+
+        <section>
+          <div className="flex items-baseline justify-between mb-3">
+            <h3 className="text-base text-ink" style={{ fontFamily: "var(--jp-serif)", fontWeight: 600 }}>
+              ✓ 直近の決定事項
+            </h3>
+            <button type="button" onClick={() => onNavigate?.("change-logs")}
+              data-testid="recent-decisions-see-all"
+              className="text-[11px] text-ink-soft hover:text-ink">
+              全件を見る →
+            </button>
+          </div>
+          {recent5Decisions.length === 0 ? (
+            <p className="text-xs text-ink-soft text-center py-4 border border-dashed border-rule rounded-xl">
+              決定事項がありません
+            </p>
+          ) : (
+            <ul className="space-y-2" data-testid="recent-decisions-list">
+              {recent5Decisions.map((d) => {
+                const meeting = findMeeting(d.meetingId);
+                const co = meeting ? findCompany(meeting.companyId) : undefined;
+                return (
+                  <li key={d.id} className="bg-paper border border-rule rounded-xl p-3"
+                      data-testid={`recent-decision-${d.id}`}>
+                    <div className="flex items-start gap-2">
+                      <DecisionStatusBadge status={d.status} />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-ink truncate">{d.content}</p>
+                        <p className="text-[11px] text-ink-soft mt-0.5">
+                          {co ? co.name : "—"}
+                        </p>
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
+      </div>
+    </div>
+  );
+}
+
+// ---- グローバル検索バー (ヘッダーに統合) ----
+
+const SEARCH_DEBOUNCE_MS = 300;
+
+export function GlobalSearchPanel({ data, query, onNavigate, onClose }) {
+  const result = useMemo(() => runGlobalSearchInline(data, query), [data, query]);
+  const q = query.trim();
+  if (q.length === 0) return null;
+
+  return (
+    <div
+      data-testid="global-search-panel"
+      className="absolute top-full left-0 right-0 mt-2 bg-bg border border-rule rounded-2xl shadow-2xl overflow-hidden z-40 max-h-[70vh] flex flex-col"
+      style={{ boxShadow: "0 16px 48px rgba(26,24,22,0.2)" }}
+    >
+      <div className="px-4 py-2 border-b border-rule bg-paper flex items-center justify-between">
+        <span className="font-serif-en text-[11px] uppercase tracking-widest text-wood-deep">
+          Search results: {result.totalCount}
+        </span>
+        <button type="button" onClick={onClose} data-testid="global-search-close"
+          aria-label="検索結果を閉じる"
+          className="text-xs text-ink-soft hover:text-ink">
+          ✕
+        </button>
+      </div>
+      <div className="overflow-y-auto p-3 space-y-3">
+        {result.totalCount === 0 ? (
+          <p className="text-sm text-ink-soft text-center py-6" data-testid="global-search-empty">
+            「{q}」に一致する記録が見つかりません
+          </p>
+        ) : (
+          <>
+            <SearchResultSection title="会社" icon="🏢" entries={result.companies} testIdPrefix="search-company"
+              renderItem={(c) => (
+                <button key={c.id} type="button" data-testid={`search-company-${c.id}`}
+                  onClick={() => onNavigate?.("companies")}
+                  className="w-full text-left p-2 rounded hover:bg-paper">
+                  <p className="text-sm text-ink"><Highlight text={c.name} query={q} /></p>
+                  <p className="text-[11px] text-ink-soft"><Highlight text={c.contact} query={q} /></p>
+                </button>
+              )} />
+            <SearchResultSection title="打ち合わせ" icon="📅" entries={result.meetings} testIdPrefix="search-meeting"
+              renderItem={(m) => (
+                <button key={m.id} type="button" data-testid={`search-meeting-${m.id}`}
+                  onClick={() => onNavigate?.("meetings", { meetingId: m.id })}
+                  className="w-full text-left p-2 rounded hover:bg-paper">
+                  <p className="text-sm text-ink truncate">
+                    <Highlight text={m.title || m.agenda} query={q} />
+                  </p>
+                  <p className="text-[11px] text-ink-soft truncate">
+                    <Highlight text={m.agenda} query={q} />
+                  </p>
+                </button>
+              )} />
+            <SearchResultSection title="決定事項" icon="✓" entries={result.decisions} testIdPrefix="search-decision"
+              renderItem={(d) => (
+                <button key={d.id} type="button" data-testid={`search-decision-${d.id}`}
+                  onClick={() => onNavigate?.("meetings", { meetingId: d.meetingId })}
+                  className="w-full text-left p-2 rounded hover:bg-paper">
+                  <p className="text-sm text-ink truncate"><Highlight text={d.content} query={q} /></p>
+                  {d.specValue && (
+                    <p className="text-[11px] text-ink-soft truncate">
+                      → <Highlight text={d.specValue} query={q} />
+                    </p>
+                  )}
+                </button>
+              )} />
+            <SearchResultSection title="仕様項目" icon="📋" entries={result.specItems} testIdPrefix="search-spec-item"
+              renderItem={(s) => (
+                <button key={s.id} type="button" data-testid={`search-spec-item-${s.id}`}
+                  onClick={() => onNavigate?.("spec-comparison")}
+                  className="w-full text-left p-2 rounded hover:bg-paper">
+                  <p className="text-sm text-ink"><Highlight text={s.name} query={q} /></p>
+                </button>
+              )} />
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SearchResultSection({ title, icon, entries, testIdPrefix, renderItem }) {
+  if (entries.length === 0) return null;
+  return (
+    <div data-testid={`${testIdPrefix}-section`}>
+      <p className="font-serif-en text-[10px] uppercase tracking-widest text-wood-deep mb-1 px-2">
+        {icon} {title} ({entries.length})
+      </p>
+      <div className="space-y-1">{entries.map(renderItem)}</div>
+    </div>
+  );
+}
 
 // ===== 9. 設定・Import/Export =====
 // Sprint 6 で実装
 
 // ===== 10. メインApp・ルーティング =====
 
-function Header({ searchQuery, onSearchChange, onSettingsClick, saveDisabled }) {
+function Header({ searchQuery, onSearchChange, onSettingsClick, saveDisabled, onSearchNavigate, searchEnabled }) {
+  const [debouncedQuery, setDebouncedQuery] = useState(searchQuery);
+  const [open, setOpen] = useState(false);
+  const [searchData, setSearchData] = useState(null);
+
+  // 300ms デバウンス (TC_104)
+  useEffect(() => {
+    const id = setTimeout(() => setDebouncedQuery(searchQuery), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(id);
+  }, [searchQuery]);
+
+  // クエリが非空になったらストレージから検索対象データをロード + パネル展開
+  useEffect(() => {
+    if (!searchEnabled) return;
+    if (debouncedQuery.trim().length === 0) {
+      setSearchData(null);
+      setOpen(false);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const [companies, meetings, decisions, specItems] = await Promise.all([
+        loadCompaniesFromStorage(),
+        loadMeetingsFromStorage(),
+        loadDecisionsFromStorage(),
+        loadSpecItemsFromStorage(),
+      ]);
+      if (cancelled) return;
+      setSearchData({ companies, meetings, decisions, specItems });
+      setOpen(true);
+    })();
+    return () => { cancelled = true; };
+  }, [debouncedQuery, searchEnabled]);
+
+  const handleNavigate = (...args) => {
+    setOpen(false);
+    onSearchChange("");
+    onSearchNavigate?.(...args);
+  };
+
   return (
     <header className="bg-bg border-b border-rule sticky top-0 z-30 no-print">
       <div className="max-w-7xl mx-auto px-4 py-3 flex items-center gap-4">
@@ -3839,7 +4309,7 @@ function Header({ searchQuery, onSearchChange, onSettingsClick, saveDisabled }) 
             House Journal
           </span>
         </h1>
-        <div className="flex-1 max-w-xl hidden sm:block">
+        <div className="flex-1 max-w-xl hidden sm:block relative">
           <label htmlFor="global-search" className="sr-only">全体検索</label>
           <input
             id="global-search"
@@ -3847,10 +4317,19 @@ function Header({ searchQuery, onSearchChange, onSettingsClick, saveDisabled }) 
             data-testid="global-search-input"
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
-            placeholder="会社・打ち合わせ・仕様項目を検索（Sprint 5で有効化）"
+            onFocus={() => { if (debouncedQuery.trim().length > 0) setOpen(true); }}
+            placeholder="会社・打ち合わせ・仕様項目を検索"
             disabled={saveDisabled}
             className="w-full px-4 py-2 rounded-full border border-rule text-sm bg-bg placeholder:text-ink-soft/60 focus-visible:outline focus-visible:outline-2 ring-rust disabled:bg-paper disabled:text-ink-soft/40"
           />
+          {open && debouncedQuery.trim().length > 0 && searchData && (
+            <GlobalSearchPanel
+              data={searchData}
+              query={debouncedQuery}
+              onNavigate={handleNavigate}
+              onClose={() => { setOpen(false); onSearchChange(""); setSearchData(null); }}
+            />
+          )}
         </div>
         <button
           type="button"
@@ -4111,6 +4590,9 @@ function AppInner() {
   if (bootPhase) return <StorageBootstrapStatus phase={bootPhase} />;
 
   const saveDisabled = resolvedStorageMode === "none";
+  const handleTabNavigate = (tab) => setCurrentTab(tab);
+  // 検索パネルからのナビゲーションは現状タブ切替のみ (詳細遷移はSprint 7-Bで)
+  const handleSearchNavigate = (tab) => setCurrentTab(tab);
 
   return (
     <div className="min-h-screen bg-bg text-ink pb-20 md:pb-0">
@@ -4122,16 +4604,20 @@ function AppInner() {
         onSearchChange={setSearchQuery}
         onSettingsClick={handleSettingsClick}
         saveDisabled={saveDisabled}
+        searchEnabled={resolvedStorageMode !== "none"}
+        onSearchNavigate={handleSearchNavigate}
       />
       <TabNavigation currentTab={currentTab} onTabChange={setCurrentTab} />
 
       <main className="max-w-7xl mx-auto px-4 py-6" data-testid="main-content">
+        {currentTab === "dashboard" && <DashboardView onNavigate={handleTabNavigate} />}
         {currentTab === "companies" && <CompaniesView saveDisabled={saveDisabled} />}
         {currentTab === "spec-comparison" && <SpecComparisonView saveDisabled={saveDisabled} />}
         {currentTab === "meetings" && <MeetingsView saveDisabled={saveDisabled} />}
         {currentTab === "change-logs" && <ChangeLogsView />}
-        {currentTab !== "companies" && currentTab !== "spec-comparison"
-          && currentTab !== "meetings" && currentTab !== "change-logs" && (
+        {currentTab !== "dashboard" && currentTab !== "companies"
+          && currentTab !== "spec-comparison" && currentTab !== "meetings"
+          && currentTab !== "change-logs" && (
           <TabPlaceholder tabId={currentTab} />
         )}
 
