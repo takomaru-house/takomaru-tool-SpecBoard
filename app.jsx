@@ -4254,7 +4254,587 @@ function SearchResultSection({ title, icon, entries, testIdPrefix, renderItem })
 }
 
 // ===== 9. 設定・Import/Export =====
-// Sprint 6 で実装
+
+// ---- Sprint 6 内部ユーティリティ (src/utils/csv.js / exportImport.js のミラー) ----
+
+function escapeCsvValueInline(value) {
+  if (value === undefined || value === null) return "";
+  const str = String(value);
+  if (/[,"\r\n]/.test(str)) return `"${str.replace(/"/g, '""')}"`;
+  return str;
+}
+
+function buildCsvInline(rows) {
+  return rows.map((r) => r.map(escapeCsvValueInline).join(",")).join("\r\n");
+}
+
+function buildSpecComparisonCsvInline({ companies, categories, specItems, mode = "all" }) {
+  const header = ["カテゴリ", "仕様項目", ...companies.map((c) => c.name)];
+  const rows = [header];
+  const activeCategories = categories
+    .filter((c) => !c.deletedAt)
+    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+  for (const cat of activeCategories) {
+    const items = specItems
+      .filter((i) => !i.deletedAt && i.categoryId === cat.id)
+      .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+    for (const item of items) {
+      const values = companies.map((co) => {
+        const v = (item.values || []).find((sv) => sv.companyId === co.id);
+        return v?.value ?? "";
+      });
+      if (mode === "confirmed" && values.every((v) => !v)) continue;
+      rows.push([cat.name, item.name, ...values]);
+    }
+  }
+  return buildCsvInline(rows);
+}
+
+const EXPORT_KEY_MAP_INLINE = {
+  companies:       "companies",
+  categories:      "categories",
+  spec_items:      "specItems",
+  spec_item_notes: "specItemNotes",
+  meetings:        "meetings",
+  decisions:       "decisions",
+  change_logs:     "changeLogs",
+};
+const IMPORT_KEY_MAP_INLINE = Object.fromEntries(
+  Object.entries(EXPORT_KEY_MAP_INLINE).map(([s, j]) => [j, s])
+);
+
+async function exportAllJSONInline() {
+  const out = {
+    version: EXPORT_FORMAT_VERSION,
+    exportedAt: new Date().toISOString(),
+  };
+  for (const [storageKey, jsonField] of Object.entries(EXPORT_KEY_MAP_INLINE)) {
+    const raw = await storage.getItem(storageKey);
+    try {
+      const v = raw ? JSON.parse(raw) : [];
+      out[jsonField] = Array.isArray(v) ? v : [];
+    } catch { out[jsonField] = []; }
+  }
+  return out;
+}
+
+function validateImportFileInline(json) {
+  if (json === null || json === undefined) return "JSONの形式が不正です";
+  if (typeof json !== "object" || Array.isArray(json)) return "JSONの形式が不正です";
+  if (json.version === undefined) return "JSONの形式が不正です (version フィールドがありません)";
+  if (json.version !== EXPORT_FORMAT_VERSION) {
+    return `バージョン不一致: インポートファイル(${json.version}) / 現在(${EXPORT_FORMAT_VERSION})。互換性のないデータは無視されます。`;
+  }
+  return null;
+}
+
+const FORBIDDEN_PROTO_KEYS_INLINE = new Set(["__proto__", "constructor", "prototype"]);
+
+function sanitizeEntityInline(entity) {
+  if (!entity || typeof entity !== "object") return entity;
+  const out = {};
+  for (const key of Object.keys(entity)) {
+    if (FORBIDDEN_PROTO_KEYS_INLINE.has(key)) continue;
+    out[key] = entity[key];
+  }
+  return out;
+}
+
+function resolveAllIdConflictsInline(importJson, existing, mode) {
+  const baseLists = {};
+  for (const storageKey of Object.values(IMPORT_KEY_MAP_INLINE)) {
+    baseLists[storageKey] = mode === "merge" ? [...(existing[storageKey] || [])] : [];
+  }
+  const existingIds = {};
+  for (const k of Object.keys(baseLists)) {
+    existingIds[k] = new Set(baseLists[k].map((e) => e?.id).filter(Boolean));
+  }
+  const newCollections = {};
+  const remap = {};
+  for (const [jsonField, list] of Object.entries(importJson)) {
+    if (jsonField === "version" || jsonField === "exportedAt") continue;
+    const storageKey = IMPORT_KEY_MAP_INLINE[jsonField];
+    if (!storageKey) continue;
+    if (!Array.isArray(list)) continue;
+    const resolved = [];
+    const fieldRemap = {};
+    for (const rawItem of list) {
+      const sanitized = sanitizeEntityInline(rawItem);
+      if (!sanitized || !sanitized.id) continue;
+      let updated = sanitized;
+      if (existingIds[storageKey].has(sanitized.id)) {
+        updated = { ...sanitized, id: newId() };
+        fieldRemap[sanitized.id] = updated.id;
+      }
+      existingIds[storageKey].add(updated.id);
+      resolved.push(updated);
+    }
+    newCollections[storageKey] = resolved;
+    remap[storageKey] = fieldRemap;
+  }
+  const FK_MAPPING = {
+    spec_items:      { categoryId: "categories" },
+    spec_item_notes: { specItemId: "spec_items", companyId: "companies" },
+    meetings:        { companyId: "companies" },
+    decisions:       { meetingId: "meetings", specItemId: "spec_items", specCompanyId: "companies" },
+    change_logs:     { specItemId: "spec_items", companyId: "companies", meetingId: "meetings" },
+  };
+  for (const [storageKey, fields] of Object.entries(FK_MAPPING)) {
+    const collection = newCollections[storageKey];
+    if (!collection) continue;
+    for (const item of collection) {
+      for (const [field, refKey] of Object.entries(fields)) {
+        const mapping = remap[refKey];
+        if (mapping && item[field] && mapping[item[field]]) {
+          item[field] = mapping[item[field]];
+        }
+      }
+    }
+    if (storageKey === "spec_items") {
+      for (const item of collection) {
+        if (!Array.isArray(item.values)) continue;
+        item.values = item.values.map((v) => ({
+          ...v,
+          companyId: remap.companies?.[v.companyId] || v.companyId,
+          meetingId: v.meetingId && remap.meetings?.[v.meetingId]
+            ? remap.meetings[v.meetingId] : v.meetingId,
+        }));
+      }
+    }
+  }
+  const result = { ...baseLists };
+  for (const [storageKey, collection] of Object.entries(newCollections)) {
+    if (mode === "merge") {
+      result[storageKey] = [...(result[storageKey] || []), ...collection];
+    } else {
+      result[storageKey] = collection;
+    }
+  }
+  return result;
+}
+
+async function importAllInline(json, mode, { allowVersionMismatch = false } = {}) {
+  const err = validateImportFileInline(json);
+  if (err) {
+    if (!allowVersionMismatch || !/バージョン不一致/.test(err)) {
+      throw new Error(err);
+    }
+  }
+  const existingByStorage = {};
+  const snapshotByStorage = {};
+  for (const storageKey of Object.values(IMPORT_KEY_MAP_INLINE)) {
+    const raw = await storage.getItem(storageKey);
+    snapshotByStorage[storageKey] = raw;
+    try {
+      const v = raw ? JSON.parse(raw) : [];
+      existingByStorage[storageKey] = Array.isArray(v) ? v : [];
+    } catch { existingByStorage[storageKey] = []; }
+  }
+  const resolved = resolveAllIdConflictsInline(json, existingByStorage, mode);
+  const writtenKeys = [];
+  try {
+    for (const [storageKey, list] of Object.entries(resolved)) {
+      await storage.setItem(storageKey, JSON.stringify(list));
+      writtenKeys.push(storageKey);
+    }
+    return { resolved };
+  } catch (e) {
+    for (const storageKey of writtenKeys) {
+      try {
+        if (snapshotByStorage[storageKey] === null || snapshotByStorage[storageKey] === undefined) {
+          await storage.removeItem(storageKey);
+        } else {
+          await storage.setItem(storageKey, snapshotByStorage[storageKey]);
+        }
+      } catch { /* ignore */ }
+    }
+    throw e;
+  }
+}
+
+async function computeStorageUsageInline() {
+  const result = { keys: {}, total: 0 };
+  for (const key of Object.values(STORAGE_KEYS)) {
+    const raw = await storage.getItem(key);
+    const bytes = raw ? new TextEncoder().encode(raw).length : 0;
+    result.keys[key] = bytes;
+    result.total += bytes;
+  }
+  return result;
+}
+
+// ---- ダウンロード/ファイル選択ヘルパー ----
+
+function triggerDownload(filename, content, mimeType = "application/json") {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function readFileAsText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsText(file);
+  });
+}
+
+// ---- ストレージ使用量カード ----
+
+function StorageUsageCard({ usage }) {
+  if (!usage) return null;
+  const warningLimit = STORAGE_WARNING_BYTES;
+  return (
+    <div className="bg-paper border border-rule rounded-2xl p-5" data-testid="storage-usage-card">
+      <div className="flex items-baseline justify-between mb-3">
+        <h3 className="text-base text-ink" style={{ fontFamily: "var(--jp-serif)", fontWeight: 600 }}>
+          ストレージ使用量
+        </h3>
+        <span className="font-mono text-xs text-ink-soft">
+          <span data-testid="storage-usage-total">{usage.total.toLocaleString()}</span> bytes
+        </span>
+      </div>
+      <div className="space-y-2 text-xs">
+        {Object.entries(usage.keys).map(([key, bytes]) => {
+          const pct = Math.min(100, Math.round((bytes / warningLimit) * 100));
+          const tone = bytes > warningLimit ? "bg-rust" : bytes > warningLimit / 2 ? "bg-wood" : "bg-sage";
+          return (
+            <div key={key} data-testid={`storage-usage-${key}`}>
+              <div className="flex justify-between text-ink-soft mb-1">
+                <span className="font-mono">{key}</span>
+                <span className="font-mono">{bytes.toLocaleString()} B</span>
+              </div>
+              <div className="w-full h-1.5 bg-rule/50 rounded-full overflow-hidden">
+                <div className={`h-full ${tone}`} style={{ width: `${pct}%` }} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <p className="mt-3 text-[11px] text-ink-soft">
+        警告閾値: {warningLimit.toLocaleString()} bytes / キー
+      </p>
+    </div>
+  );
+}
+
+// ---- アーカイブビュー (論理削除済みデータ表示) ----
+
+function ArchiveSection({ title, entries, renderItem, testIdPrefix }) {
+  if (entries.length === 0) return null;
+  return (
+    <section data-testid={`archive-section-${testIdPrefix}`}>
+      <h4 className="text-sm text-ink mt-4 mb-2" style={{ fontFamily: "var(--jp-serif)", fontWeight: 600 }}>
+        {title} ({entries.length})
+      </h4>
+      <ul className="space-y-1 text-xs text-ink-soft">
+        {entries.map((e) => (
+          <li key={e.id} className="bg-paper/50 border border-rule rounded px-3 py-2"
+              data-testid={`archive-${testIdPrefix}-${e.id}`}>
+            {renderItem(e)}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+// ---- 設定ビュー ----
+
+export function SettingsView({ saveDisabled, onClose }) {
+  const showToast = useToast();
+  const showConfirm = useConfirm();
+
+  const [usage, setUsage] = useState(null);
+  const [meta, setMeta] = useState(null);
+  const [archived, setArchived] = useState(null);
+  const [importMode, setImportMode] = useState("merge");
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const reload = useCallback(async () => {
+    setUsage(await computeStorageUsageInline());
+    setMeta(await loadMeta());
+    const [cos, cats, items, meetings] = await Promise.all([
+      loadCompaniesFromStorage(),
+      loadCategoriesFromStorage(),
+      loadSpecItemsFromStorage(),
+      loadMeetingsFromStorage(),
+    ]);
+    setArchived({
+      companies: cos.filter((c) => c.deletedAt),
+      categories: cats.filter((c) => c.deletedAt),
+      specItems: items.filter((i) => i.deletedAt),
+      meetings: meetings.filter((m) => m.deletedAt),
+    });
+  }, []);
+
+  useEffect(() => { reload(); }, [reload]);
+
+  const handleExportJson = async () => {
+    try {
+      const data = await exportAllJSONInline();
+      const filename = `takomaru-specboard-${data.exportedAt.slice(0, 10)}.json`;
+      triggerDownload(filename, JSON.stringify(data, null, 2), "application/json");
+      showToast("success", "JSON をエクスポートしました");
+    } catch (e) {
+      showToast("error", "エクスポートに失敗しました");
+      console.error(e);
+    }
+  };
+
+  const handleExportCsv = async (mode) => {
+    try {
+      const [cos, cats, items] = await Promise.all([
+        loadCompaniesFromStorage(),
+        loadCategoriesFromStorage(),
+        loadSpecItemsFromStorage(),
+      ]);
+      const activeCos = cos.filter((c) => !c.deletedAt);
+      const csv = buildSpecComparisonCsvInline({
+        companies: activeCos, categories: cats, specItems: items, mode,
+      });
+      const filename = `spec-comparison-${new Date().toISOString().slice(0, 10)}.csv`;
+      // RFC 4180: BOM 付きで Excel での文字化けを回避
+      triggerDownload(filename, "﻿" + csv, "text/csv");
+      showToast("success", "CSV をエクスポートしました");
+    } catch (e) {
+      showToast("error", "CSVエクスポートに失敗しました");
+      console.error(e);
+    }
+  };
+
+  const handleImportFile = async (file) => {
+    if (!file) return;
+    setImporting(true);
+    try {
+      const text = await readFileAsText(file);
+      let parsed;
+      try { parsed = JSON.parse(text); }
+      catch { showToast("error", "JSONの解析に失敗しました"); return; }
+
+      const error = validateImportFileInline(parsed);
+      if (error) {
+        if (/バージョン不一致/.test(error)) {
+          showToast("warning", error);
+          const ok = await showConfirm(
+            "バージョン不一致を検出しました",
+            "続行しますか？ 互換性のないデータは無視される可能性があります。"
+          );
+          if (!ok) return;
+          await importAllInline(parsed, importMode, { allowVersionMismatch: true });
+        } else {
+          showToast("error", error);
+          return;
+        }
+      } else {
+        if (importMode === "overwrite") {
+          const ok = await showConfirm(
+            "上書きインポートしますか？",
+            "既存のデータは全て上書きされます (元に戻せません)。"
+          );
+          if (!ok) return;
+        }
+        await importAllInline(parsed, importMode);
+      }
+
+      await reload();
+      showToast("success", "インポートが完了しました");
+    } catch (e) {
+      console.error(e);
+      showToast("error", "インポートに失敗しました。データは変更されていません");
+    } finally {
+      setImporting(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const handlePrint = () => {
+    if (typeof window !== "undefined" && typeof window.print === "function") {
+      window.print();
+    }
+  };
+
+  if (!usage || !archived) return <Spinner label="設定を読み込み中..." />;
+
+  return (
+    <div data-testid="settings-view">
+      <div className="flex items-baseline justify-between mb-6 gap-3 flex-wrap">
+        <div>
+          <h2 className="text-xl text-ink" style={{ fontFamily: "var(--jp-serif)", fontWeight: 600 }}>
+            設定
+          </h2>
+          <p className="font-serif-en text-[11px] uppercase tracking-widest text-wood-deep mt-1">
+            Settings
+          </p>
+        </div>
+        {onClose && (
+          <button type="button" onClick={onClose} data-testid="settings-close"
+            className="text-sm text-ink-soft hover:text-ink">
+            ← 戻る
+          </button>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* データ管理 */}
+        <section className="bg-paper border border-rule rounded-2xl p-5">
+          <h3 className="text-base text-ink mb-1" style={{ fontFamily: "var(--jp-serif)", fontWeight: 600 }}>
+            データ管理
+          </h3>
+          <p className="font-serif-en text-[10px] uppercase tracking-widest text-wood-deep mb-3">
+            Data Management
+          </p>
+          <div className="space-y-3">
+            <button type="button" onClick={handleExportJson}
+              data-testid="export-json-button"
+              disabled={saveDisabled}
+              className="w-full px-4 py-2 rounded-full bg-rust text-white text-sm hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed">
+              📥 JSON でエクスポート (全件)
+            </button>
+            <div>
+              <label htmlFor="import-mode" className="text-xs text-ink-soft block mb-1" style={{ letterSpacing: "0.08em" }}>
+                インポートモード
+              </label>
+              <select id="import-mode" data-testid="import-mode-select"
+                value={importMode} onChange={(e) => setImportMode(e.target.value)}
+                disabled={saveDisabled || importing}
+                className="w-full px-3 py-2 rounded-lg border border-rule bg-bg text-sm focus-visible:outline focus-visible:outline-2 ring-rust">
+                <option value="merge">マージ (既存に追加)</option>
+                <option value="overwrite">上書き (既存を全て置換)</option>
+              </select>
+            </div>
+            <input ref={fileInputRef} type="file" accept="application/json"
+              data-testid="import-file-input"
+              onChange={(e) => handleImportFile(e.target.files?.[0])}
+              disabled={saveDisabled || importing}
+              className="hidden" />
+            <button type="button"
+              data-testid="import-json-button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={saveDisabled || importing}
+              className="w-full px-4 py-2 rounded-full border border-rule text-sm text-ink hover:bg-rule/40 disabled:opacity-40 disabled:cursor-not-allowed">
+              📤 JSON からインポート
+            </button>
+          </div>
+
+          <div className="mt-5 pt-4 border-t border-rule">
+            <p className="font-serif-en text-[10px] uppercase tracking-widest text-wood-deep mb-2">CSV Export</p>
+            <div className="grid grid-cols-2 gap-2">
+              <button type="button" onClick={() => handleExportCsv("all")}
+                data-testid="export-csv-all-button"
+                className="px-3 py-1.5 rounded-full border border-rule text-xs text-ink-soft hover:text-ink">
+                全件
+              </button>
+              <button type="button" onClick={() => handleExportCsv("confirmed")}
+                data-testid="export-csv-confirmed-button"
+                className="px-3 py-1.5 rounded-full border border-rule text-xs text-ink-soft hover:text-ink">
+                確定済みのみ
+              </button>
+            </div>
+          </div>
+        </section>
+
+        {/* ストレージ使用量 */}
+        <div className="space-y-6">
+          <StorageUsageCard usage={usage} />
+
+          {/* 累積保存回数 */}
+          <div className="bg-paper border border-rule rounded-2xl p-5" data-testid="save-count-card">
+            <h3 className="text-base text-ink mb-1" style={{ fontFamily: "var(--jp-serif)", fontWeight: 600 }}>
+              累積保存回数
+            </h3>
+            <p className="font-serif-en text-[10px] uppercase tracking-widest text-wood-deep mb-3">
+              Save Count
+            </p>
+            <p className="text-3xl font-mono text-ink" data-testid="save-count-value">
+              {meta?.saveCount ?? 0}
+            </p>
+            <p className="text-[11px] text-ink-soft mt-1">
+              50回ごとに JSON バックアップを推奨します
+            </p>
+          </div>
+
+          {/* 印刷 */}
+          <div className="bg-paper border border-rule rounded-2xl p-5" data-testid="print-card">
+            <h3 className="text-base text-ink mb-1" style={{ fontFamily: "var(--jp-serif)", fontWeight: 600 }}>
+              印刷
+            </h3>
+            <p className="font-serif-en text-[10px] uppercase tracking-widest text-wood-deep mb-3">
+              Print
+            </p>
+            <button type="button" onClick={handlePrint}
+              data-testid="print-button"
+              className="px-4 py-2 rounded-full border border-rule text-sm text-ink hover:bg-rule/40">
+              🖨 印刷プレビューを開く
+            </button>
+            <p className="text-[11px] text-ink-soft mt-2">
+              現在のタブの内容を @media print 形式で印刷します
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* アーカイブ */}
+      <section className="mt-8 bg-paper border border-rule rounded-2xl p-5" data-testid="archive-card">
+        <h3 className="text-base text-ink mb-1" style={{ fontFamily: "var(--jp-serif)", fontWeight: 600 }}>
+          アーカイブ (削除済みデータ)
+        </h3>
+        <p className="font-serif-en text-[10px] uppercase tracking-widest text-wood-deep mb-3">
+          Archive
+        </p>
+        {(archived.companies.length === 0 && archived.categories.length === 0 &&
+          archived.specItems.length === 0 && archived.meetings.length === 0) ? (
+          <p className="text-xs text-ink-soft text-center py-4 border border-dashed border-rule rounded-xl">
+            論理削除されたデータはありません
+          </p>
+        ) : (
+          <div>
+            <ArchiveSection title="会社" testIdPrefix="company"
+              entries={archived.companies}
+              renderItem={(c) => (
+                <>
+                  <span className="text-ink">{c.name}</span>
+                  <span className="ml-2 font-mono">削除日: {(c.deletedAt || "").slice(0, 10)}</span>
+                </>
+              )} />
+            <ArchiveSection title="カテゴリ" testIdPrefix="category"
+              entries={archived.categories}
+              renderItem={(c) => (
+                <>
+                  <span className="text-ink">{c.name}</span>
+                  <span className="ml-2 font-mono">削除日: {(c.deletedAt || "").slice(0, 10)}</span>
+                </>
+              )} />
+            <ArchiveSection title="仕様項目" testIdPrefix="spec-item"
+              entries={archived.specItems}
+              renderItem={(s) => (
+                <>
+                  <span className="text-ink">{s.name}</span>
+                  <span className="ml-2 font-mono">削除日: {(s.deletedAt || "").slice(0, 10)}</span>
+                </>
+              )} />
+            <ArchiveSection title="打ち合わせ" testIdPrefix="meeting"
+              entries={archived.meetings}
+              renderItem={(m) => (
+                <>
+                  <span className="text-ink">{m.title}</span>
+                  <span className="ml-2 font-mono">削除日: {(m.deletedAt || "").slice(0, 10)}</span>
+                </>
+              )} />
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
 
 // ===== 10. メインApp・ルーティング =====
 
@@ -4579,13 +5159,16 @@ function AppInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleSettingsClick = useCallback(async () => {
-    const ok = await showConfirm(
-      "Sprint 6 で実装予定の機能です",
-      "設定画面（JSON Export/Import・印刷・アーカイブ・ストレージ使用量）は Sprint 6 で利用可能になります。\nダイアログを閉じますか？"
-    );
-    if (ok) showToast("info", "設定画面は Sprint 6 で実装されます");
-  }, [showConfirm, showToast]);
+  const [previousTab, setPreviousTab] = useState("dashboard");
+  const handleSettingsClick = useCallback(() => {
+    if (currentTab !== "settings") {
+      setPreviousTab(currentTab);
+      setCurrentTab("settings");
+    }
+  }, [currentTab]);
+  const handleSettingsClose = useCallback(() => {
+    setCurrentTab(previousTab || "dashboard");
+  }, [previousTab]);
 
   if (bootPhase) return <StorageBootstrapStatus phase={bootPhase} />;
 
@@ -4615,9 +5198,12 @@ function AppInner() {
         {currentTab === "spec-comparison" && <SpecComparisonView saveDisabled={saveDisabled} />}
         {currentTab === "meetings" && <MeetingsView saveDisabled={saveDisabled} />}
         {currentTab === "change-logs" && <ChangeLogsView />}
+        {currentTab === "settings" && (
+          <SettingsView saveDisabled={saveDisabled} onClose={handleSettingsClose} />
+        )}
         {currentTab !== "dashboard" && currentTab !== "companies"
           && currentTab !== "spec-comparison" && currentTab !== "meetings"
-          && currentTab !== "change-logs" && (
+          && currentTab !== "change-logs" && currentTab !== "settings" && (
           <TabPlaceholder tabId={currentTab} />
         )}
 
