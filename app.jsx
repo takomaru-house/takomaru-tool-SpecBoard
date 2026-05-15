@@ -5229,109 +5229,10 @@ function AppInner() {
           && currentTab !== "change-logs" && currentTab !== "settings" && (
           <TabPlaceholder tabId={currentTab} />
         )}
-
-        {/* 開発用デバッグパネル（Sprint 0 のみ） */}
-        <DevDebugPanel
-          storageMode={resolvedStorageMode}
-          showToast={showToast}
-          showConfirm={showConfirm}
-        />
       </main>
 
       <BottomNavigation currentTab={currentTab} onTabChange={setCurrentTab} />
     </div>
-  );
-}
-
-// Sprint 0 動作確認用デバッグパネル（Sprint 1 以降で削除予定）
-function DevDebugPanel({ storageMode: mode, showToast, showConfirm }) {
-  const [meta, setMeta] = useState(null);
-
-  const refreshMeta = useCallback(async () => {
-    setMeta(await loadMeta());
-  }, []);
-
-  useEffect(() => { refreshMeta(); }, [refreshMeta]);
-
-  const handleTestToasts = () => {
-    showToast("success", "保存しました");
-    setTimeout(() => showToast("info", "情報メッセージ"), 200);
-    setTimeout(() => showToast("warning", "容量警告メッセージ"), 400);
-    setTimeout(() => showToast("error", "エラーメッセージ"), 600);
-  };
-
-  const handleTestConfirm = async () => {
-    const ok = await showConfirm(
-      "この操作を実行しますか？",
-      "確認ダイアログのテストです。削除等の不可逆操作で使用します。"
-    );
-    showToast(ok ? "success" : "info", ok ? "確定されました" : "キャンセルされました");
-  };
-
-  const handleIncrementSave = async () => {
-    await incrementSaveCount(showToast);
-    await refreshMeta();
-  };
-
-  const handleSimulate50 = async () => {
-    const m = await loadMeta();
-    await saveMeta({ ...m, saveCount: 49 });
-    await incrementSaveCount(showToast);
-    await refreshMeta();
-  };
-
-  return (
-    <section
-      className="mt-12 p-5 border border-dashed border-rule rounded-2xl bg-paper/60"
-      data-testid="dev-debug-panel"
-    >
-      <div className="flex items-baseline gap-3 mb-4">
-        <span className="font-serif-en uppercase text-xs text-wood-deep">Sprint 0 Debug</span>
-        <h2 className="text-sm text-ink-soft" style={{ fontFamily: "var(--jp-serif)", fontWeight: 500 }}>
-          動作確認パネル（Sprint 1 以降で削除予定）
-        </h2>
-      </div>
-      <dl className="text-xs text-ink-soft grid grid-cols-[140px_1fr] gap-y-1 mb-5">
-        <dt className="font-serif-en uppercase tracking-wider opacity-70">APP_VERSION</dt>
-        <dd className="font-mono text-ink">{APP_VERSION}</dd>
-        <dt className="font-serif-en uppercase tracking-wider opacity-70">SCHEMA_VERSION</dt>
-        <dd className="font-mono text-ink">{SCHEMA_VERSION}</dd>
-        <dt className="font-serif-en uppercase tracking-wider opacity-70">storageMode</dt>
-        <dd className="font-mono text-ink" data-testid="debug-storage-mode">{mode}</dd>
-        <dt className="font-serif-en uppercase tracking-wider opacity-70">META.saveCount</dt>
-        <dd className="font-mono text-ink" data-testid="debug-save-count">{meta?.saveCount ?? "-"}</dd>
-        <dt className="font-serif-en uppercase tracking-wider opacity-70">META.schemaVersion</dt>
-        <dd className="font-mono text-ink">{meta?.schemaVersion ?? "-"}</dd>
-      </dl>
-      <div className="flex flex-wrap gap-2">
-        <DebugButton testId="debug-test-toasts" onClick={handleTestToasts}>
-          Toast 4種テスト
-        </DebugButton>
-        <DebugButton testId="debug-test-confirm" onClick={handleTestConfirm}>
-          確認ダイアログテスト
-        </DebugButton>
-        <DebugButton testId="debug-increment-save" onClick={handleIncrementSave} disabled={mode === "none"}>
-          saveCount +1
-        </DebugButton>
-        <DebugButton testId="debug-simulate-50" onClick={handleSimulate50} disabled={mode === "none"}>
-          saveCount=50 をシミュレート
-        </DebugButton>
-      </div>
-    </section>
-  );
-}
-
-function DebugButton({ children, onClick, disabled, testId }) {
-  return (
-    <button
-      type="button"
-      data-testid={testId}
-      onClick={onClick}
-      disabled={disabled}
-      className="px-4 py-1.5 text-xs rounded-full border border-rule bg-bg text-ink-soft hover:text-ink hover:border-wood-deep disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 ring-rust transition"
-    >
-      {children}
-    </button>
   );
 }
 
