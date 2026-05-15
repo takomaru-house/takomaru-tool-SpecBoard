@@ -1,0 +1,746 @@
+{
+  "version": "1.0",
+  "exportedAt": "2026-05-15T00:00:00.000Z",
+
+  "_comment_usage": "サンプルデータです。設定画面 → インポートモード [上書き] でこの JSON をインポートしてください。標準仕様テンプレートと既存データは全て置き換えられます。",
+
+  "companies": [
+    {
+      "id": "co-akura",
+      "createdAt": "2026-02-15T10:00:00.000Z",
+      "name": "アキュラホーム",
+      "type": "maker",
+      "contact": "石原 拓実",
+      "phone": "048-555-0011",
+      "email": "ishihara@akura-sample.co.jp",
+      "status": "considering",
+      "note": "展示場で名刺をもらった。完全自由設計と謳っているが、標準仕様の幅は限定的に感じた。価格は中位。"
+    },
+    {
+      "id": "co-ichijo",
+      "createdAt": "2026-02-20T11:30:00.000Z",
+      "name": "一条工務店",
+      "type": "maker",
+      "contact": "鈴木 美咲",
+      "phone": "053-555-0022",
+      "email": "suzuki@ichijo-sample.co.jp",
+      "status": "candidate",
+      "note": "断熱・気密性能が圧倒的。UA値 0.25 を標準で達成。i-smartシリーズを検討中。"
+    },
+    {
+      "id": "co-sekisui",
+      "createdAt": "2026-03-01T09:00:00.000Z",
+      "name": "セキスイハイム",
+      "type": "maker",
+      "contact": "高橋 健一",
+      "phone": "03-555-0033",
+      "email": "takahashi@sekisui-sample.co.jp",
+      "status": "rejected",
+      "note": "ユニット工法による工期短縮は魅力。提案された見積りが予算オーバー。",
+      "rejectionNote": "見積りが3,800万円で予算 3,200万円を大幅超過。グレード調整も難しいとのことで断念。担当者対応は丁寧だった。"
+    },
+    {
+      "id": "co-kinoie",
+      "createdAt": "2026-03-10T14:00:00.000Z",
+      "name": "木の家工房",
+      "type": "builder",
+      "contact": "佐藤 一郎",
+      "phone": "0263-555-0044",
+      "email": "sato@kinoie-koubou.example.jp",
+      "status": "candidate",
+      "note": "地元工務店。国産無垢材を標準で使用。設計自由度は高いがアフターサポートに不安あり。"
+    },
+    {
+      "id": "co-passive",
+      "createdAt": "2026-03-20T13:00:00.000Z",
+      "name": "パッシブ住宅プラス",
+      "type": "builder",
+      "contact": "山田 真理子",
+      "phone": "045-555-0055",
+      "email": "yamada@passive-plus.example.jp",
+      "status": "contracted",
+      "note": "Passivhaus 認定基準準拠の高性能住宅。気密性 C値 0.3 を保証。2026-05-10 に契約締結。"
+    },
+    {
+      "id": "co-deleted-example",
+      "createdAt": "2026-01-15T10:00:00.000Z",
+      "name": "（旧）検討候補A社",
+      "type": "maker",
+      "contact": "（削除済み）",
+      "status": "considering",
+      "note": "初期検討から早期に離脱。アーカイブで確認可能。",
+      "deletedAt": "2026-02-10T00:00:00.000Z"
+    }
+  ],
+
+  "categories": [
+    {
+      "id": "cat-insulation",
+      "createdAt": "2026-02-15T00:00:00.000Z",
+      "name": "断熱",
+      "normalizedName": "断熱",
+      "sortOrder": 0,
+      "isDefault": true
+    },
+    {
+      "id": "cat-windows",
+      "createdAt": "2026-02-15T00:00:00.000Z",
+      "name": "開口部（窓）",
+      "normalizedName": "開口部（窓）",
+      "sortOrder": 1,
+      "isDefault": true
+    },
+    {
+      "id": "cat-structure",
+      "createdAt": "2026-02-15T00:00:00.000Z",
+      "name": "構造",
+      "normalizedName": "構造",
+      "sortOrder": 2,
+      "isDefault": true
+    },
+    {
+      "id": "cat-water",
+      "createdAt": "2026-02-15T00:00:00.000Z",
+      "name": "設備（水回り）",
+      "normalizedName": "設備（水回り）",
+      "sortOrder": 3,
+      "isDefault": true
+    },
+    {
+      "id": "cat-warranty",
+      "createdAt": "2026-02-15T00:00:00.000Z",
+      "name": "保証・アフターサービス",
+      "normalizedName": "保証・アフターサービス",
+      "sortOrder": 4,
+      "isDefault": true
+    }
+  ],
+
+  "specItems": [
+    {
+      "id": "si-insulation-method",
+      "createdAt": "2026-02-15T00:00:00.000Z",
+      "categoryId": "cat-insulation",
+      "name": "断熱工法",
+      "sortOrder": 0,
+      "values": [
+        { "companyId": "co-akura",   "value": "充填断熱（グラスウール）",     "meetingId": "mt-002", "updatedAt": "2026-04-05T11:00:00.000Z" },
+        { "companyId": "co-ichijo",  "value": "外内ダブル断熱（EPS）",         "meetingId": "mt-004", "updatedAt": "2026-04-12T14:00:00.000Z" },
+        { "companyId": "co-sekisui", "value": "充填断熱（ロックウール）",     "meetingId": "mt-005", "updatedAt": "2026-04-15T10:00:00.000Z" },
+        { "companyId": "co-kinoie",  "value": "充填断熱（セルロースファイバー）", "meetingId": "mt-007", "updatedAt": "2026-04-20T15:00:00.000Z" },
+        { "companyId": "co-passive", "value": "外張り断熱＋付加断熱（フェノールフォーム）", "meetingId": "mt-009", "updatedAt": "2026-05-01T13:00:00.000Z" }
+      ]
+    },
+    {
+      "id": "si-insulation-material",
+      "createdAt": "2026-02-15T00:00:00.000Z",
+      "categoryId": "cat-insulation",
+      "name": "断熱材の種類",
+      "sortOrder": 1,
+      "values": [
+        { "companyId": "co-akura",   "value": "高性能グラスウール 16K 105mm",  "meetingId": "mt-002", "updatedAt": "2026-04-05T11:05:00.000Z" },
+        { "companyId": "co-ichijo",  "value": "EPS 190mm + 50mm",              "meetingId": "mt-004", "updatedAt": "2026-04-12T14:05:00.000Z" },
+        { "companyId": "co-sekisui", "value": "ロックウール 100mm",            "meetingId": "mt-005", "updatedAt": "2026-04-15T10:05:00.000Z" },
+        { "companyId": "co-kinoie",  "value": "セルロースファイバー 140mm",   "meetingId": "mt-007", "updatedAt": "2026-04-20T15:05:00.000Z" },
+        { "companyId": "co-passive", "value": "フェノバボード 100mm + ネオマフォーム 60mm", "meetingId": "mt-010", "updatedAt": "2026-05-08T14:00:00.000Z" }
+      ]
+    },
+    {
+      "id": "si-ua-value",
+      "createdAt": "2026-02-15T00:00:00.000Z",
+      "categoryId": "cat-insulation",
+      "name": "断熱等性能等級（UA値）",
+      "sortOrder": 2,
+      "values": [
+        { "companyId": "co-akura",   "value": "等級5 / UA値 0.60",  "meetingId": "mt-002", "updatedAt": "2026-04-05T11:10:00.000Z" },
+        { "companyId": "co-ichijo",  "value": "等級7 / UA値 0.25", "meetingId": "mt-004", "updatedAt": "2026-04-12T14:10:00.000Z" },
+        { "companyId": "co-kinoie",  "value": "等級6 / UA値 0.46", "meetingId": "mt-007", "updatedAt": "2026-04-20T15:10:00.000Z" },
+        { "companyId": "co-passive", "value": "等級7 / UA値 0.23", "meetingId": "mt-010", "updatedAt": "2026-05-08T14:05:00.000Z" }
+      ]
+    },
+    {
+      "id": "si-floor-insulation",
+      "createdAt": "2026-02-15T00:00:00.000Z",
+      "categoryId": "cat-insulation",
+      "name": "床断熱材",
+      "sortOrder": 3,
+      "values": [
+        { "companyId": "co-ichijo",  "value": "EPS 200mm",  "meetingId": "mt-004", "updatedAt": "2026-04-12T14:15:00.000Z" },
+        { "companyId": "co-kinoie",  "value": "基礎断熱（押出法ポリスチレン 100mm）", "meetingId": "mt-007", "updatedAt": "2026-04-20T15:15:00.000Z" },
+        { "companyId": "co-passive", "value": "基礎断熱（ネオマフォーム 100mm）", "meetingId": "mt-010", "updatedAt": "2026-05-08T14:10:00.000Z" }
+      ]
+    },
+
+    {
+      "id": "si-sash",
+      "createdAt": "2026-02-15T00:00:00.000Z",
+      "categoryId": "cat-windows",
+      "name": "サッシの種類",
+      "sortOrder": 0,
+      "values": [
+        { "companyId": "co-akura",   "value": "アルミ樹脂複合（YKK APW330）", "meetingId": "mt-002", "updatedAt": "2026-04-05T11:20:00.000Z" },
+        { "companyId": "co-ichijo",  "value": "オリジナル樹脂サッシ",      "meetingId": "mt-004", "updatedAt": "2026-04-12T14:20:00.000Z" },
+        { "companyId": "co-kinoie",  "value": "樹脂サッシ（YKK APW430）",     "meetingId": "mt-007", "updatedAt": "2026-04-20T15:20:00.000Z" },
+        { "companyId": "co-passive", "value": "木製サッシ（マーヴィン）+ 樹脂サッシ併用", "meetingId": "mt-010", "updatedAt": "2026-05-08T14:15:00.000Z" }
+      ]
+    },
+    {
+      "id": "si-glass",
+      "createdAt": "2026-02-15T00:00:00.000Z",
+      "categoryId": "cat-windows",
+      "name": "ガラスの種類",
+      "sortOrder": 1,
+      "values": [
+        { "companyId": "co-akura",   "value": "Low-Eペアガラス（アルゴンガス）",  "meetingId": "mt-002", "updatedAt": "2026-04-05T11:25:00.000Z" },
+        { "companyId": "co-ichijo",  "value": "防犯トリプルガラス（クリプトンガス）", "meetingId": "mt-004", "updatedAt": "2026-04-12T14:25:00.000Z" },
+        { "companyId": "co-kinoie",  "value": "Low-Eトリプルガラス（アルゴンガス）", "meetingId": "mt-007", "updatedAt": "2026-04-20T15:25:00.000Z" },
+        { "companyId": "co-passive", "value": "Low-Eトリプルガラス（クリプトンガス・南面のみ日射取得型）", "meetingId": "mt-010", "updatedAt": "2026-05-08T14:20:00.000Z" }
+      ]
+    },
+    {
+      "id": "si-entrance-door",
+      "createdAt": "2026-02-15T00:00:00.000Z",
+      "categoryId": "cat-windows",
+      "name": "玄関ドアの種類",
+      "sortOrder": 2,
+      "values": [
+        { "companyId": "co-ichijo",  "value": "オリジナル高断熱玄関ドア",  "meetingId": "mt-004", "updatedAt": "2026-04-12T14:30:00.000Z" },
+        { "companyId": "co-kinoie",  "value": "YKK イノベスト D70",          "meetingId": "mt-007", "updatedAt": "2026-04-20T15:30:00.000Z" },
+        { "companyId": "co-passive", "value": "ガデリウス スウェディッシュドア", "meetingId": "mt-010", "updatedAt": "2026-05-08T14:25:00.000Z" }
+      ]
+    },
+
+    {
+      "id": "si-construction",
+      "createdAt": "2026-02-15T00:00:00.000Z",
+      "categoryId": "cat-structure",
+      "name": "工法",
+      "sortOrder": 0,
+      "values": [
+        { "companyId": "co-akura",   "value": "木造軸組（プレカット）",  "meetingId": "mt-002", "updatedAt": "2026-04-05T11:35:00.000Z" },
+        { "companyId": "co-ichijo",  "value": "2x6 ハイドラパネル工法",  "meetingId": "mt-004", "updatedAt": "2026-04-12T14:35:00.000Z" },
+        { "companyId": "co-sekisui", "value": "鉄骨ユニット工法",        "meetingId": "mt-005", "updatedAt": "2026-04-15T10:30:00.000Z" },
+        { "companyId": "co-kinoie",  "value": "木造軸組（金物工法）",    "meetingId": "mt-007", "updatedAt": "2026-04-20T15:35:00.000Z" },
+        { "companyId": "co-passive", "value": "木造軸組＋構造用合板（耐震＋気密）", "meetingId": "mt-010", "updatedAt": "2026-05-08T14:30:00.000Z" }
+      ]
+    },
+    {
+      "id": "si-seismic",
+      "createdAt": "2026-02-15T00:00:00.000Z",
+      "categoryId": "cat-structure",
+      "name": "耐震等級",
+      "sortOrder": 1,
+      "values": [
+        { "companyId": "co-akura",   "value": "耐震等級3（許容応力度計算）",  "meetingId": "mt-002", "updatedAt": "2026-04-05T11:40:00.000Z" },
+        { "companyId": "co-ichijo",  "value": "耐震等級3（性能表示）",       "meetingId": "mt-004", "updatedAt": "2026-04-12T14:40:00.000Z" },
+        { "companyId": "co-kinoie",  "value": "耐震等級3（許容応力度計算）",  "meetingId": "mt-007", "updatedAt": "2026-04-20T15:40:00.000Z" },
+        { "companyId": "co-passive", "value": "耐震等級3＋制震ダンパー（ミライエ）", "meetingId": "mt-010", "updatedAt": "2026-05-08T14:35:00.000Z" }
+      ]
+    },
+    {
+      "id": "si-foundation",
+      "createdAt": "2026-02-15T00:00:00.000Z",
+      "categoryId": "cat-structure",
+      "name": "基礎の種類",
+      "sortOrder": 2,
+      "values": [
+        { "companyId": "co-akura",   "value": "ベタ基礎（標準）",   "meetingId": "mt-002", "updatedAt": "2026-04-05T11:45:00.000Z" },
+        { "companyId": "co-ichijo",  "value": "ベタ基礎（高耐圧）", "meetingId": "mt-004", "updatedAt": "2026-04-12T14:45:00.000Z" },
+        { "companyId": "co-kinoie",  "value": "ベタ基礎（鉄筋ダブル配筋）", "meetingId": "mt-007", "updatedAt": "2026-04-20T15:45:00.000Z" },
+        { "companyId": "co-passive", "value": "ベタ基礎（一体打設・基礎断熱）", "meetingId": "mt-010", "updatedAt": "2026-05-08T14:40:00.000Z" }
+      ]
+    },
+    {
+      "id": "si-ground-warranty",
+      "createdAt": "2026-02-15T00:00:00.000Z",
+      "categoryId": "cat-structure",
+      "name": "地盤保証",
+      "sortOrder": 3,
+      "values": [
+        { "companyId": "co-ichijo",  "value": "ジャパンホームシールド 20年",  "meetingId": "mt-004", "updatedAt": "2026-04-12T14:50:00.000Z" },
+        { "companyId": "co-kinoie",  "value": "地盤ネット保証 10年",          "meetingId": "mt-007", "updatedAt": "2026-04-20T15:50:00.000Z" },
+        { "companyId": "co-passive", "value": "ジャパンホームシールド 20年",  "meetingId": "mt-010", "updatedAt": "2026-05-08T14:45:00.000Z" }
+      ]
+    },
+
+    {
+      "id": "si-kitchen",
+      "createdAt": "2026-02-15T00:00:00.000Z",
+      "categoryId": "cat-water",
+      "name": "キッチン",
+      "sortOrder": 0,
+      "values": [
+        { "companyId": "co-akura",   "value": "LIXIL リシェルSI 2,550mm",          "meetingId": "mt-002", "updatedAt": "2026-04-05T11:55:00.000Z" },
+        { "companyId": "co-ichijo",  "value": "オリジナル ステディア（人造大理石）", "meetingId": "mt-004", "updatedAt": "2026-04-12T14:55:00.000Z" },
+        { "companyId": "co-kinoie",  "value": "Panasonic Lクラス（フラットアイランド）", "meetingId": "mt-007", "updatedAt": "2026-04-20T15:55:00.000Z" },
+        { "companyId": "co-passive", "value": "クリナップ セントロ（セラミックトップ）", "meetingId": "mt-010", "updatedAt": "2026-05-08T14:50:00.000Z" }
+      ]
+    },
+    {
+      "id": "si-bath",
+      "createdAt": "2026-02-15T00:00:00.000Z",
+      "categoryId": "cat-water",
+      "name": "浴室",
+      "sortOrder": 1,
+      "values": [
+        { "companyId": "co-akura",   "value": "LIXIL アライズ 1坪",     "meetingId": "mt-002", "updatedAt": "2026-04-05T12:00:00.000Z" },
+        { "companyId": "co-ichijo",  "value": "オリジナル スマートバス 1.25坪", "meetingId": "mt-004", "updatedAt": "2026-04-12T15:00:00.000Z" },
+        { "companyId": "co-kinoie",  "value": "TOTO サザナ 1.25坪",     "meetingId": "mt-007", "updatedAt": "2026-04-20T16:00:00.000Z" },
+        { "companyId": "co-passive", "value": "TOTO シンラ 1.25坪",     "meetingId": "mt-010", "updatedAt": "2026-05-08T14:55:00.000Z" }
+      ]
+    },
+    {
+      "id": "si-washbasin",
+      "createdAt": "2026-02-15T00:00:00.000Z",
+      "categoryId": "cat-water",
+      "name": "洗面台",
+      "sortOrder": 2,
+      "values": [
+        { "companyId": "co-ichijo",  "value": "オリジナル 1,200mm（カウンター一体型）", "meetingId": "mt-004", "updatedAt": "2026-04-12T15:05:00.000Z" },
+        { "companyId": "co-kinoie",  "value": "Panasonic シーライン 1,200mm", "meetingId": "mt-007", "updatedAt": "2026-04-20T16:05:00.000Z" },
+        { "companyId": "co-passive", "value": "造作洗面台（タイル天板・三栄水栓）", "meetingId": "mt-010", "updatedAt": "2026-05-08T15:00:00.000Z" }
+      ]
+    },
+    {
+      "id": "si-toilet",
+      "createdAt": "2026-02-15T00:00:00.000Z",
+      "categoryId": "cat-water",
+      "name": "トイレ",
+      "sortOrder": 3,
+      "values": [
+        { "companyId": "co-akura",   "value": "LIXIL サティスS（タンクレス）", "meetingId": "mt-002", "updatedAt": "2026-04-05T12:10:00.000Z" },
+        { "companyId": "co-ichijo",  "value": "TOTO ネオレストAH1", "meetingId": "mt-004", "updatedAt": "2026-04-12T15:10:00.000Z" },
+        { "companyId": "co-kinoie",  "value": "TOTO GG3 一体型", "meetingId": "mt-007", "updatedAt": "2026-04-20T16:10:00.000Z" },
+        { "companyId": "co-passive", "value": "TOTO ネオレストRH1", "meetingId": "mt-010", "updatedAt": "2026-05-08T15:05:00.000Z" }
+      ]
+    },
+
+    {
+      "id": "si-initial-warranty",
+      "createdAt": "2026-02-15T00:00:00.000Z",
+      "categoryId": "cat-warranty",
+      "name": "初期保証年数",
+      "sortOrder": 0,
+      "values": [
+        { "companyId": "co-akura",   "value": "初期保証 20年（構造・防水）",   "meetingId": "mt-002", "updatedAt": "2026-04-05T12:15:00.000Z" },
+        { "companyId": "co-ichijo",  "value": "初期保証 30年（構造・防水）",   "meetingId": "mt-004", "updatedAt": "2026-04-12T15:15:00.000Z" },
+        { "companyId": "co-kinoie",  "value": "初期保証 10年（構造）",          "meetingId": "mt-007", "updatedAt": "2026-04-20T16:15:00.000Z" },
+        { "companyId": "co-passive", "value": "初期保証 30年（構造・防水・気密）", "meetingId": "mt-010", "updatedAt": "2026-05-08T15:10:00.000Z" }
+      ]
+    },
+    {
+      "id": "si-long-warranty",
+      "createdAt": "2026-02-15T00:00:00.000Z",
+      "categoryId": "cat-warranty",
+      "name": "長期保証の条件",
+      "sortOrder": 1,
+      "values": [
+        { "companyId": "co-ichijo",  "value": "最長 60年（10年毎の点検・有償メンテで延長）", "meetingId": "mt-004", "updatedAt": "2026-04-12T15:20:00.000Z" },
+        { "companyId": "co-kinoie",  "value": "最長 30年（10年毎の有償点検）",            "meetingId": "mt-007", "updatedAt": "2026-04-20T16:20:00.000Z" },
+        { "companyId": "co-passive", "value": "最長 60年（5年毎の点検・補修部位は実費）", "meetingId": "mt-010", "updatedAt": "2026-05-08T15:15:00.000Z" }
+      ]
+    },
+    {
+      "id": "si-periodic-inspection",
+      "createdAt": "2026-02-15T00:00:00.000Z",
+      "categoryId": "cat-warranty",
+      "name": "定期点検の頻度",
+      "sortOrder": 2,
+      "values": [
+        { "companyId": "co-ichijo",  "value": "引渡し後 3ヶ月 / 1年 / 2年 / 5年 / 10年", "meetingId": "mt-004", "updatedAt": "2026-04-12T15:25:00.000Z" },
+        { "companyId": "co-kinoie",  "value": "1年 / 5年 / 10年（無償）",                "meetingId": "mt-007", "updatedAt": "2026-04-20T16:25:00.000Z" },
+        { "companyId": "co-passive", "value": "3ヶ月 / 1年 / 2年 / 5年 / 10年 / 15年 / 20年", "meetingId": "mt-010", "updatedAt": "2026-05-08T15:20:00.000Z" }
+      ]
+    }
+  ],
+
+  "specItemNotes": [
+    {
+      "id": "sin-001",
+      "createdAt": "2026-04-12T14:30:00.000Z",
+      "updatedAt": "2026-04-12T14:30:00.000Z",
+      "specItemId": "si-ua-value",
+      "companyId": "co-ichijo",
+      "note": "UA値 0.25 は業界トップクラス。冬の暖房費が大幅に下がる見込み。"
+    },
+    {
+      "id": "sin-002",
+      "createdAt": "2026-04-20T15:30:00.000Z",
+      "updatedAt": "2026-04-20T15:30:00.000Z",
+      "specItemId": "si-construction",
+      "companyId": "co-kinoie",
+      "note": "金物工法で構造強度は高いが、リフォーム時の自由度に注意。"
+    },
+    {
+      "id": "sin-003",
+      "createdAt": "2026-05-08T15:30:00.000Z",
+      "updatedAt": "2026-05-08T15:30:00.000Z",
+      "specItemId": "si-glass",
+      "companyId": "co-passive",
+      "note": "南面の日射取得型ガラスで冬の暖房負荷をさらに削減。最有力。"
+    },
+    {
+      "id": "sin-004",
+      "createdAt": "2026-04-05T12:30:00.000Z",
+      "updatedAt": "2026-04-05T12:30:00.000Z",
+      "specItemId": "si-kitchen",
+      "companyId": "co-akura",
+      "note": "標準仕様でも十分。アイランド化はオプション。"
+    }
+  ],
+
+  "meetings": [
+    {
+      "id": "mt-001",
+      "createdAt": "2026-03-25T09:00:00.000Z",
+      "companyId": "co-akura",
+      "date": "2026-03-25",
+      "title": "2026-03-25 アキュラホーム",
+      "location": "アキュラホーム 浦和展示場",
+      "attendees": ["施主夫婦", "石原 拓実"],
+      "agenda": "プラン相談初回。土地面積・予算・希望間取りのヒアリング。",
+      "summary": "30坪・LDK 20帖・収納重視。予算 3,200万円（本体）。次回までに3パターン提案いただく。"
+    },
+    {
+      "id": "mt-002",
+      "createdAt": "2026-04-05T11:00:00.000Z",
+      "companyId": "co-akura",
+      "date": "2026-04-05",
+      "title": "2026-04-05 アキュラホーム",
+      "location": "アキュラホーム 浦和展示場",
+      "attendees": ["施主夫婦", "石原 拓実", "設計担当・林"],
+      "agenda": "プラン提案 + 標準仕様の説明。",
+      "summary": "プランB（LDK 22帖）が好評。標準仕様は中位グレード。価格は 2,950万円。次回は外観仕様。"
+    },
+
+    {
+      "id": "mt-003",
+      "createdAt": "2026-04-02T10:30:00.000Z",
+      "companyId": "co-ichijo",
+      "date": "2026-04-02",
+      "title": "2026-04-02 一条工務店",
+      "location": "一条工務店 横浜支店",
+      "attendees": ["施主夫婦", "鈴木 美咲"],
+      "agenda": "i-smartシリーズの説明とプラン相談。",
+      "summary": "i-smart II + 太陽光6kW + 蓄電池7kWh。トータル 3,400万円。"
+    },
+    {
+      "id": "mt-004",
+      "createdAt": "2026-04-12T14:00:00.000Z",
+      "companyId": "co-ichijo",
+      "date": "2026-04-12",
+      "title": "2026-04-12 一条工務店",
+      "location": "一条工務店 横浜支店",
+      "attendees": ["施主夫婦", "鈴木 美咲", "営業所長・井上"],
+      "agenda": "標準仕様詳細確認。断熱・耐震・設備グレード。",
+      "summary": "標準仕様の幅で十分。UA値 0.25・トリプルガラス・全館床暖房が魅力。値引き条件を次回提示予定。"
+    },
+
+    {
+      "id": "mt-005",
+      "createdAt": "2026-04-15T10:00:00.000Z",
+      "companyId": "co-sekisui",
+      "date": "2026-04-15",
+      "title": "2026-04-15 セキスイハイム",
+      "location": "セキスイハイム 三鷹展示場",
+      "attendees": ["施主夫婦", "高橋 健一"],
+      "agenda": "ユニット工法の説明・初回プラン。",
+      "summary": "工期 4ヶ月の短縮提案。見積 3,800万円で予算超過。"
+    },
+    {
+      "id": "mt-006",
+      "createdAt": "2026-04-25T11:00:00.000Z",
+      "companyId": "co-sekisui",
+      "date": "2026-04-25",
+      "title": "2026-04-25 セキスイハイム",
+      "location": "オンライン",
+      "attendees": ["施主夫婦", "高橋 健一"],
+      "agenda": "グレード調整案の協議。",
+      "summary": "予算内に収めるための仕様削減案を提示いただいたが、性能面で妥協が大きいため見送る方向。"
+    },
+
+    {
+      "id": "mt-007",
+      "createdAt": "2026-04-20T15:00:00.000Z",
+      "companyId": "co-kinoie",
+      "date": "2026-04-20",
+      "title": "2026-04-20 木の家工房",
+      "location": "木の家工房 信濃町ショールーム",
+      "attendees": ["施主夫婦", "佐藤 一郎", "設計士・佐藤 麻衣"],
+      "agenda": "設計コンセプトと標準仕様のヒアリング。",
+      "summary": "国産無垢材を全面採用。柱材は東濃ヒノキ。プランは2週間後に提示予定。"
+    },
+    {
+      "id": "mt-008",
+      "createdAt": "2026-05-05T10:00:00.000Z",
+      "companyId": "co-kinoie",
+      "date": "2026-05-05",
+      "title": "2026-05-05 木の家工房",
+      "location": "木の家工房 信濃町ショールーム",
+      "attendees": ["施主夫婦", "佐藤 一郎"],
+      "agenda": "プラン提案 + 見積提示。",
+      "summary": "プラン提示。木の質感は素晴らしい。3,100万円。耐震等級3 + 構造計算実施。検討継続。"
+    },
+
+    {
+      "id": "mt-009",
+      "createdAt": "2026-05-01T13:00:00.000Z",
+      "companyId": "co-passive",
+      "date": "2026-05-01",
+      "title": "2026-05-01 パッシブ住宅プラス",
+      "location": "パッシブ住宅プラス 横浜本社",
+      "attendees": ["施主夫婦", "山田 真理子", "設計責任者・大澤"],
+      "agenda": "Passivhaus 認定仕様の説明・初回プラン。",
+      "summary": "気密 C値 0.3 保証。HEMS・全熱交換換気・基礎断熱。総工費 3,300万円。最有力候補に。"
+    },
+    {
+      "id": "mt-010",
+      "createdAt": "2026-05-08T14:00:00.000Z",
+      "companyId": "co-passive",
+      "date": "2026-05-08",
+      "title": "2026-05-08 パッシブ住宅プラス",
+      "location": "パッシブ住宅プラス 横浜本社",
+      "attendees": ["施主夫婦", "山田 真理子", "工事担当・松井"],
+      "agenda": "標準仕様の詳細確認・契約条件協議。",
+      "summary": "断熱仕様確定（フェノバ + ネオマ）。耐震等級3 + 制震ダンパー。契約金は来週入金。"
+    },
+    {
+      "id": "mt-011",
+      "createdAt": "2026-05-10T11:00:00.000Z",
+      "companyId": "co-passive",
+      "date": "2026-05-10",
+      "title": "2026-05-10 パッシブ住宅プラス（契約締結）",
+      "location": "パッシブ住宅プラス 横浜本社",
+      "attendees": ["施主夫婦", "山田 真理子", "代表取締役・西田"],
+      "agenda": "請負契約締結。着工日確定。",
+      "summary": "契約締結。着工 2026-08-01 予定、引渡 2027-02-15 予定。残金は引渡時。仕様の最終確認は7月。"
+    }
+  ],
+
+  "decisions": [
+    {
+      "id": "de-001",
+      "createdAt": "2026-04-05T11:50:00.000Z",
+      "meetingId": "mt-002",
+      "content": "アキュラホームのプランBを基本として再提案を依頼する",
+      "status": "pending",
+      "note": "外観仕様の比較が必要"
+    },
+    {
+      "id": "de-002",
+      "createdAt": "2026-04-12T15:30:00.000Z",
+      "meetingId": "mt-004",
+      "content": "一条工務店の太陽光6kWは標準のままで提案を受ける",
+      "status": "confirmed",
+      "specItemId": "si-ua-value",
+      "specCompanyId": "co-ichijo",
+      "specValue": "等級7 / UA値 0.25",
+      "note": "性能面では業界トップ"
+    },
+    {
+      "id": "de-003",
+      "createdAt": "2026-04-15T11:00:00.000Z",
+      "meetingId": "mt-005",
+      "content": "セキスイハイム見積（3,800万円）は予算オーバーのため、グレード調整案を依頼",
+      "status": "cancelled",
+      "note": "次回協議でも予算内に収まらず断念"
+    },
+    {
+      "id": "de-004",
+      "createdAt": "2026-04-25T12:00:00.000Z",
+      "meetingId": "mt-006",
+      "content": "セキスイハイムは予算面の理由で見送り",
+      "status": "confirmed",
+      "note": "断り連絡は別途実施"
+    },
+    {
+      "id": "de-005",
+      "createdAt": "2026-04-20T16:00:00.000Z",
+      "meetingId": "mt-007",
+      "content": "木の家工房は構造材として東濃ヒノキを採用",
+      "status": "confirmed",
+      "specItemId": "si-construction",
+      "specCompanyId": "co-kinoie",
+      "specValue": "木造軸組（金物工法）",
+      "note": "東濃ヒノキの標準採用"
+    },
+    {
+      "id": "de-006",
+      "createdAt": "2026-05-05T11:00:00.000Z",
+      "meetingId": "mt-008",
+      "content": "木の家工房の見積 3,100万円は予算内。性能面の比較を継続",
+      "status": "pending",
+      "note": "断熱・気密性能の数値検証中"
+    },
+    {
+      "id": "de-007",
+      "createdAt": "2026-05-01T14:00:00.000Z",
+      "meetingId": "mt-009",
+      "content": "パッシブ住宅プラスを最有力候補とする",
+      "status": "confirmed",
+      "note": "C値 0.3 保証・全熱交換換気・基礎断熱"
+    },
+    {
+      "id": "de-008",
+      "createdAt": "2026-05-08T14:30:00.000Z",
+      "meetingId": "mt-010",
+      "content": "断熱仕様をフェノバボード + ネオマフォームで確定",
+      "status": "confirmed",
+      "specItemId": "si-insulation-material",
+      "specCompanyId": "co-passive",
+      "specValue": "フェノバボード 100mm + ネオマフォーム 60mm",
+      "note": "性能とコストのバランス重視"
+    },
+    {
+      "id": "de-009",
+      "createdAt": "2026-05-08T15:00:00.000Z",
+      "meetingId": "mt-010",
+      "content": "耐震等級3 + 制震ダンパー（ミライエ）を採用",
+      "status": "confirmed",
+      "specItemId": "si-seismic",
+      "specCompanyId": "co-passive",
+      "specValue": "耐震等級3＋制震ダンパー（ミライエ）",
+      "note": "繰り返し地震への備え"
+    },
+    {
+      "id": "de-010",
+      "createdAt": "2026-05-10T11:30:00.000Z",
+      "meetingId": "mt-011",
+      "content": "パッシブ住宅プラスと請負契約を締結（契約日 2026-05-10）",
+      "status": "confirmed",
+      "note": "着工 2026-08-01・引渡 2027-02-15"
+    },
+    {
+      "id": "de-011",
+      "createdAt": "2026-05-10T11:35:00.000Z",
+      "meetingId": "mt-011",
+      "content": "外構工事は別途見積（着工後に発注）",
+      "status": "pending",
+      "note": "造園 + カーポート + 駐車場舗装"
+    },
+    {
+      "id": "de-012",
+      "createdAt": "2026-05-10T11:40:00.000Z",
+      "meetingId": "mt-011",
+      "content": "オプション: 食洗機を Bosch SMS6 にグレードアップ",
+      "status": "pending",
+      "specItemId": "si-kitchen",
+      "specCompanyId": "co-passive",
+      "specValue": "クリナップ セントロ + Bosch SMS6 食洗機",
+      "note": "オプション +35 万円"
+    }
+  ],
+
+  "changeLogs": [
+    {
+      "id": "cl-001",
+      "specItemId": "si-insulation-method",
+      "companyId": "co-akura",
+      "previousValue": "",
+      "newValue": "充填断熱（グラスウール）",
+      "meetingId": "mt-002",
+      "reason": "プラン提案時の標準仕様",
+      "changedAt": "2026-04-05T11:00:00.000Z",
+      "createdAt": "2026-04-05T11:00:00.000Z"
+    },
+    {
+      "id": "cl-002",
+      "specItemId": "si-ua-value",
+      "companyId": "co-ichijo",
+      "previousValue": "",
+      "newValue": "等級6 / UA値 0.40",
+      "meetingId": "mt-003",
+      "reason": "初回提案時の数値",
+      "changedAt": "2026-04-02T11:00:00.000Z",
+      "createdAt": "2026-04-02T11:00:00.000Z"
+    },
+    {
+      "id": "cl-003",
+      "specItemId": "si-ua-value",
+      "companyId": "co-ichijo",
+      "previousValue": "等級6 / UA値 0.40",
+      "newValue": "等級7 / UA値 0.25",
+      "meetingId": "mt-004",
+      "reason": "i-smart II の最新仕様で再計算した結果。後勝ち更新（同一仕様項目を打ち合わせで再決定）",
+      "changedAt": "2026-04-12T14:10:00.000Z",
+      "createdAt": "2026-04-12T14:10:00.000Z"
+    },
+    {
+      "id": "cl-004",
+      "specItemId": "si-insulation-material",
+      "companyId": "co-passive",
+      "previousValue": "",
+      "newValue": "ネオマフォーム 100mm",
+      "meetingId": "mt-009",
+      "reason": "初回提案",
+      "changedAt": "2026-05-01T13:30:00.000Z",
+      "createdAt": "2026-05-01T13:30:00.000Z"
+    },
+    {
+      "id": "cl-005",
+      "specItemId": "si-insulation-material",
+      "companyId": "co-passive",
+      "previousValue": "ネオマフォーム 100mm",
+      "newValue": "フェノバボード 100mm + ネオマフォーム 60mm",
+      "meetingId": "mt-010",
+      "reason": "性能向上と日本での実績考慮で変更。後勝ち更新",
+      "changedAt": "2026-05-08T14:00:00.000Z",
+      "createdAt": "2026-05-08T14:00:00.000Z"
+    },
+    {
+      "id": "cl-006",
+      "specItemId": "si-seismic",
+      "companyId": "co-passive",
+      "previousValue": "耐震等級3",
+      "newValue": "耐震等級3＋制震ダンパー（ミライエ）",
+      "meetingId": "mt-010",
+      "reason": "繰り返し地震への対策として制震ダンパーを追加",
+      "changedAt": "2026-05-08T14:35:00.000Z",
+      "createdAt": "2026-05-08T14:35:00.000Z"
+    },
+    {
+      "id": "cl-007",
+      "specItemId": "si-glass",
+      "companyId": "co-passive",
+      "previousValue": "Low-Eトリプルガラス（アルゴンガス）",
+      "newValue": "Low-Eトリプルガラス（クリプトンガス・南面のみ日射取得型）",
+      "meetingId": "mt-010",
+      "reason": "南面の日射取得を最大化し、冬の暖房負荷を削減",
+      "changedAt": "2026-05-08T14:20:00.000Z",
+      "createdAt": "2026-05-08T14:20:00.000Z"
+    },
+    {
+      "id": "cl-008",
+      "specItemId": "si-kitchen",
+      "companyId": "co-akura",
+      "previousValue": "",
+      "newValue": "LIXIL リシェルSI 2,550mm",
+      "meetingId": "mt-002",
+      "reason": "標準仕様での提案",
+      "changedAt": "2026-04-05T11:55:00.000Z",
+      "createdAt": "2026-04-05T11:55:00.000Z"
+    },
+    {
+      "id": "cl-009",
+      "specItemId": "si-construction",
+      "companyId": "co-kinoie",
+      "previousValue": "木造軸組（在来工法）",
+      "newValue": "木造軸組（金物工法）",
+      "meetingId": "mt-007",
+      "reason": "構造強度向上のため金物工法に変更",
+      "changedAt": "2026-04-20T15:35:00.000Z",
+      "createdAt": "2026-04-20T15:35:00.000Z"
+    },
+    {
+      "id": "cl-010",
+      "specItemId": "si-initial-warranty",
+      "companyId": "co-passive",
+      "previousValue": "初期保証 20年（構造）",
+      "newValue": "初期保証 30年（構造・防水・気密）",
+      "meetingId": "mt-010",
+      "reason": "気密保証を含めた長期保証契約に変更",
+      "changedAt": "2026-05-08T15:10:00.000Z",
+      "createdAt": "2026-05-08T15:10:00.000Z"
+    }
+  ]
+}

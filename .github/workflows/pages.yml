@@ -33,6 +33,8 @@ jobs:
           mkdir -p _site
           cp index.html _site/
           cp app.jsx _site/
+          # サンプル JSON (デモデータ) も配信
+          cp -r samples _site/
           # Jekyll を無効化 (_ 付きディレクトリの除外を防ぐ。今は無いが防御的に)
           touch _site/.nojekyll
 
