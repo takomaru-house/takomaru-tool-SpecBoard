@@ -1,0 +1,60 @@
+name: Tests
+
+# 設計参照: 02-テスト/02-テスト計画.md §4-2 CI/CDパイプライン
+# - push (main / develop) + 全 PR でテスト自動実行
+# - 単体・結合・コンポーネントテストとカバレッジ計測を実施
+# - パフォーマンステストは main 配下のみ実行 (高コスト想定だが現状は軽量)
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+jobs:
+  test:
+    name: Vitest 全テスト + カバレッジ
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - name: 依存関係インストール
+        run: npm ci
+      - name: app.jsx 構文チェック
+        run: |
+          node -e "const fs=require('fs');const p=require('@babel/parser');p.parse(fs.readFileSync('app.jsx','utf-8'),{sourceType:'module',plugins:['jsx']});console.log('OK app.jsx parses');"
+      - name: 単体テスト
+        run: npm run test:unit
+      - name: 結合テスト
+        run: npm run test:integration
+      - name: コンポーネントテスト
+        run: npm run test:component
+      - name: パフォーマンス + リリース判定テスト
+        run: npx vitest run __tests__/Performance.test.js __tests__/ReleaseCriteria.test.js
+      - name: 全テスト + カバレッジ計測
+        run: npm run test:coverage
+      - name: カバレッジサマリーを抽出
+        if: always()
+        run: |
+          if [ -f coverage/coverage-summary.json ]; then
+            node -e "
+            const s = require('./coverage/coverage-summary.json');
+            const t = s.total;
+            console.log('━━━━━━━━━━━━ Coverage Summary ━━━━━━━━━━━━');
+            console.log('Lines     :', t.lines.pct + '%', '(' + t.lines.covered + '/' + t.lines.total + ')');
+            console.log('Branches  :', t.branches.pct + '%', '(' + t.branches.covered + '/' + t.branches.total + ')');
+            console.log('Functions :', t.functions.pct + '%', '(' + t.functions.covered + '/' + t.functions.total + ')');
+            console.log('Statements:', t.statements.pct + '%', '(' + t.statements.covered + '/' + t.statements.total + ')');
+            console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+            "
+          fi
+      - name: カバレッジレポートを Artifact に保存
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+          if-no-files-found: warn
+          retention-days: 14
