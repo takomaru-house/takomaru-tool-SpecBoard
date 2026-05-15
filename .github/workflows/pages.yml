@@ -1,0 +1,53 @@
+name: Deploy to GitHub Pages
+
+# main へ push されたら自動で GitHub Pages にデプロイする。
+# 配信対象: index.html + app.jsx (Babel Standalone でクライアントサイド変換)
+# 設定: GitHub リポジトリの Settings → Pages → Source を "GitHub Actions" に設定する必要あり
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同時実行を 1 つに制限 (古い Pages デプロイをキャンセル)
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Pages ペイロード準備
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 配信ディレクトリを構築
+        # 静的ホスティングに必要なファイルだけを _site/ にコピー
+        # (テスト・src/utils・docs などは公開しない)
+        run: |
+          mkdir -p _site
+          cp index.html _site/
+          cp app.jsx _site/
+          # Jekyll を無効化 (_ 付きディレクトリの除外を防ぐ。今は無いが防御的に)
+          touch _site/.nojekyll
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    name: GitHub Pages にデプロイ
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

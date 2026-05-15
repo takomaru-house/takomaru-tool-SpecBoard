@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>注文住宅管理ツール — Takomaru SpecBoard</title>
+  <meta name="description" content="注文住宅の打ち合わせ記録と仕様比較を一体管理するブラウザアプリ。ハウスメーカー・工務店との打ち合わせから決定事項を仕様比較表へ反映できます。">
+  <!-- Tailwind CSS (CDN) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Google Fonts: Noto Sans JP / Noto Serif JP / Cormorant Garamond / JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+JP:wght@400;500;600;700&family=Noto+Serif+JP:wght@500;600;700&display=swap">
+  <!-- React 18 (CDN) -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <!-- Babel Standalone (JSX 変換用) -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    body { margin: 0; background: #faf8f3; color: #1a1816;
+           font-family: "Noto Sans JP", system-ui, -apple-system, "Segoe UI", sans-serif; }
+    .sr-only {
+      position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+      overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+    }
+    /* ローディング中のスケルトン */
+    #loading {
+      position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+      background: #faf8f3; z-index: 1; transition: opacity 0.3s;
+    }
+    #loading.fade-out { opacity: 0; pointer-events: none; }
+    .spinner {
+      width: 36px; height: 36px;
+      border: 3px solid #b35a3a; border-top-color: transparent;
+      border-radius: 50%; animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-text {
+      margin-top: 16px;
+      font-family: "Cormorant Garamond", serif;
+      font-size: 11px; letter-spacing: 0.2em;
+      text-transform: uppercase; color: #8a6740;
+    }
+    .loading-title {
+      margin-top: 4px;
+      font-family: "Noto Serif JP", serif;
+      font-size: 14px; color: #4a4640;
+    }
+  </style>
+</head>
+<body>
+  <div id="loading">
+    <div style="text-align: center;">
+      <div class="spinner"></div>
+      <div class="loading-text">Loading</div>
+      <div class="loading-title">注文住宅管理ツール</div>
+    </div>
+  </div>
+
+  <!-- window.storage モック (GitHub Pages 等の通常 Web 環境では Claude.ai Artifact の
+       window.storage が存在しないため、localStorage を Promise 化して提供する) -->
+  <script>
+    (function installStorageMock() {
+      if (typeof window === "undefined" || window.storage) return;
+      const PREFIX = "__takomaru__::";
+      window.storage = {
+        getItem: (key) => Promise.resolve(localStorage.getItem(PREFIX + key)),
+        setItem: (key, value) => { localStorage.setItem(PREFIX + key, value); return Promise.resolve(); },
+        removeItem: (key) => { localStorage.removeItem(PREFIX + key); return Promise.resolve(); },
+      };
+    })();
+  </script>
+
+  <div id="root"></div>
+
+  <!-- app.jsx を fetch して JSX→JS 変換、export default App を window.App に差し替えて mount -->
+  <script>
+    (async function bootstrap() {
+      const root = document.getElementById("root");
+      const loading = document.getElementById("loading");
+      try {
+        const src = await fetch("./app.jsx").then((r) => {
+          if (!r.ok) throw new Error(`fetch 失敗: ${r.status}`);
+          return r.text();
+        });
+        // export default App → window.App = App
+        // export function/const/let/var → 通常宣言に変換 (Function スコープで動作させるため)
+        const transformed = src
+          .replace(/^\s*export\s+default\s+App\s*;?\s*$/m, "window.App = App;")
+          .replace(/^\s*export\s+(function|const|let|var|class)\s+/gm, "$1 ");
+        const code = Babel.transform(transformed, { presets: ["env", "react"] }).code;
+        // eslint-disable-next-line no-new-func
+        new Function(code)();
+        if (typeof window.App !== "function") {
+          throw new Error("window.App が定義されませんでした。app.jsx を確認してください。");
+        }
+        ReactDOM.createRoot(root).render(React.createElement(window.App));
+        loading.classList.add("fade-out");
+        setTimeout(() => loading.remove(), 400);
+      } catch (e) {
+        console.error("初期化エラー:", e);
+        loading.innerHTML =
+          `<div style="padding:24px;color:#b35a3a;font-family:'Noto Sans JP',sans-serif;max-width:480px;line-height:1.7;">
+            <strong style="font-family:'Noto Serif JP',serif;font-size:18px;">⚠ 初期化に失敗しました</strong>
+            <p style="margin-top:12px;color:#4a4640;font-size:14px;">${e.message}</p>
+            <p style="margin-top:16px;color:#4a4640;font-size:13px;">
+              ブラウザを再読み込みしても解決しない場合、
+              <a href="https://github.com/inumaru-kazuya/takomaru-SpecBoard/issues" style="color:#b35a3a;text-decoration:underline;">GitHub Issues</a>
+              にご報告ください。
+            </p>
+          </div>`;
+      }
+    })();
+  </script>
+</body>
+</html>
