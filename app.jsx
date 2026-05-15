@@ -71,6 +71,18 @@ const COMPANY_TYPE_LABEL = {
   other:   "その他",
 };
 
+// ステータスバッジの色マッピング (CLAUDE.md デザインガイドラインの「用途マッピング」に準拠)
+// - 確定/契約済 → sage (green)
+// - 検討中     → paper + wood-deep 文字 (subtle)
+// - 候補       → wood (highlighted)
+// - 落選       → ink-soft (muted)
+const COMPANY_STATUS_BADGE = {
+  considering: { bg: "bg-paper", text: "text-wood-deep", border: "border-rule" },
+  candidate:   { bg: "bg-wood",      text: "text-white",      border: "border-transparent" },
+  rejected:    { bg: "bg-bg",        text: "text-ink-soft",   border: "border-rule" },
+  contracted:  { bg: "bg-sage",      text: "text-white",      border: "border-transparent" },
+};
+
 const DECISION_STATUS = {
   CONFIRMED: "confirmed",
   PENDING:   "pending",
@@ -91,11 +103,12 @@ const PRIORITY_LABEL = {
 
 const VALIDATION = {
   Company: {
-    name:    { required: true,  maxLength: 50 },
-    contact: { required: true,  maxLength: 30 },
-    phone:   { required: false, maxLength: 15,  pattern: /^[\d\-\+\(\)\s]*$/ },
-    email:   { required: false, maxLength: 100, pattern: /^[^\s@]+@[^\s@]+\.[^\s@]+$/ },
-    note:    { required: false, maxLength: 500 },
+    name:          { required: true,  maxLength: 50 },
+    contact:       { required: true,  maxLength: 30 },
+    phone:         { required: false, maxLength: 15,  pattern: /^[\d\-\+\(\)\s]*$/ },
+    email:         { required: false, maxLength: 100, pattern: /^[^\s@]+@[^\s@]+\.[^\s@]+$/ },
+    note:          { required: false, maxLength: 500 },
+    rejectionNote: { required: false, maxLength: 500 },
   },
   Meeting: {
     date:      { required: true,  format: "YYYY-MM-DD" },
@@ -646,7 +659,653 @@ function StorageUnavailableBanner({ mode }) {
 // =====================================================================
 
 // ===== 4. 会社管理コンポーネント =====
-// Sprint 1 で実装
+
+// app.jsx 内で利用するロジック (src/utils/validation.js / company.js のミラー)
+// テストは src/utils/ 側の純粋関数で実施する。
+// VALIDATION 定数は Section 1 (型定義・定数) に集約済み。
+
+function validateCompanyInline(input) {
+  const errors = {};
+  const v = VALIDATION.Company;
+  const name = String(input?.name ?? "");
+  if (v.name.required && name.trim().length === 0) errors.name = "会社名は必須です";
+  else if (name.length > v.name.maxLength) errors.name = `${v.name.maxLength}文字以内で入力してください`;
+  const contact = String(input?.contact ?? "");
+  if (v.contact.required && contact.trim().length === 0) errors.contact = "担当者は必須です";
+  else if (contact.length > v.contact.maxLength) errors.contact = `${v.contact.maxLength}文字以内で入力してください`;
+  if (input?.phone) {
+    const phone = String(input.phone);
+    if (phone.length > v.phone.maxLength) errors.phone = `${v.phone.maxLength}文字以内で入力してください`;
+    else if (!v.phone.pattern.test(phone)) errors.phone = "電話番号の形式が不正です (数字・ハイフン・括弧のみ)";
+  }
+  if (input?.email) {
+    const email = String(input.email);
+    if (email.length > v.email.maxLength) errors.email = `${v.email.maxLength}文字以内で入力してください`;
+    else if (!v.email.pattern.test(email)) errors.email = "メールアドレスの形式が不正です";
+  }
+  if (input?.note && String(input.note).length > v.note.maxLength) {
+    errors.note = `${v.note.maxLength}文字以内で入力してください`;
+  }
+  if (input?.rejectionNote && String(input.rejectionNote).length > v.rejectionNote.maxLength) {
+    errors.rejectionNote = `${v.rejectionNote.maxLength}文字以内で入力してください`;
+  }
+  return errors;
+}
+
+function isDuplicateCompanyNameInline(name, companies, excludeId = null) {
+  const normalized = String(name ?? "").trim().toLowerCase();
+  if (normalized.length === 0) return false;
+  return companies.some(
+    (c) => !c.deletedAt && c.id !== excludeId &&
+      String(c.name ?? "").trim().toLowerCase() === normalized
+  );
+}
+
+async function loadCompaniesFromStorage() {
+  const raw = await storage.getItem(STORAGE_KEYS.COMPANIES);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+async function saveCompaniesToStorage(companies, showToast) {
+  await saveWithCapacityCheck(STORAGE_KEYS.COMPANIES, companies, showToast);
+}
+
+function createCompanyEntity(input) {
+  const now = new Date().toISOString();
+  return {
+    id: newId(),
+    createdAt: now,
+    name: String(input.name ?? "").trim(),
+    type: input.type || "maker",
+    contact: String(input.contact ?? "").trim(),
+    phone: input.phone ? String(input.phone).trim() : undefined,
+    email: input.email ? String(input.email).trim() : undefined,
+    status: input.status || "considering",
+    note: input.note ? String(input.note) : undefined,
+    rejectionNote: input.rejectionNote ? String(input.rejectionNote) : undefined,
+  };
+}
+
+function updateCompanyEntity(original, input) {
+  return {
+    ...original,
+    name: String(input.name ?? "").trim(),
+    type: input.type || original.type,
+    contact: String(input.contact ?? "").trim(),
+    phone: input.phone ? String(input.phone).trim() : undefined,
+    email: input.email ? String(input.email).trim() : undefined,
+    status: input.status || original.status,
+    note: input.note ? String(input.note) : undefined,
+    rejectionNote: input.rejectionNote ? String(input.rejectionNote) : undefined,
+  };
+}
+
+// ---- ステータスバッジ ----
+
+function StatusBadge({ status, testId }) {
+  const style = COMPANY_STATUS_BADGE[status] || COMPANY_STATUS_BADGE.considering;
+  return (
+    <span
+      data-testid={testId}
+      className={`inline-flex items-center px-3 py-0.5 rounded-full text-[11px] border ${style.bg} ${style.text} ${style.border}`}
+      style={{ letterSpacing: "0.12em", fontWeight: 500 }}
+    >
+      {COMPANY_STATUS_LABEL[status] || status}
+    </span>
+  );
+}
+
+// ---- 残り文字数カウンター ----
+
+function CharCounter({ current, max }) {
+  const remaining = max - (current ?? 0);
+  const tone = remaining < 0 ? "text-rust" : remaining < 10 ? "text-wood-deep" : "text-ink-soft";
+  return (
+    <span className={`text-[11px] font-mono ${tone}`}>
+      残り {remaining}
+    </span>
+  );
+}
+
+// ---- インラインエラー ----
+
+function FieldError({ id, message }) {
+  if (!message) return null;
+  return (
+    <p id={id} role="alert" aria-live="polite" className="mt-1 text-xs text-rust">
+      {message}
+    </p>
+  );
+}
+
+// ---- フィールド共通ラッパー ----
+
+function Field({ label, htmlFor, error, hint, max, value, children }) {
+  return (
+    <div>
+      <div className="flex items-baseline justify-between">
+        <label htmlFor={htmlFor} className="text-xs text-ink-soft" style={{ letterSpacing: "0.08em" }}>
+          {label}
+        </label>
+        {max !== undefined && <CharCounter current={String(value ?? "").length} max={max} />}
+      </div>
+      <div className="mt-1">{children}</div>
+      {hint && !error && <p className="mt-1 text-xs text-ink-soft/70">{hint}</p>}
+      <FieldError id={`${htmlFor}-error`} message={error} />
+    </div>
+  );
+}
+
+// ---- 会社追加・編集モーダル ----
+
+function CompanyFormModal({ existingCompanies, initial, onSubmit, onClose, saveDisabled }) {
+  const isEdit = Boolean(initial?.id);
+  const [form, setForm] = useState({
+    name: initial?.name ?? "",
+    type: initial?.type ?? "maker",
+    contact: initial?.contact ?? "",
+    phone: initial?.phone ?? "",
+    email: initial?.email ?? "",
+    status: initial?.status ?? "considering",
+    note: initial?.note ?? "",
+    rejectionNote: initial?.rejectionNote ?? "",
+  });
+  const [errors, setErrors] = useState({});
+  const [submitted, setSubmitted] = useState(false);
+  const titleId = useMemo(() => `company-form-title-${Math.random().toString(36).slice(2, 8)}`, []);
+
+  const update = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
+
+  const liveErrors = useMemo(() => validateCompanyInline(form), [form]);
+  const visibleErrors = submitted ? liveErrors : errors;
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    setSubmitted(true);
+    const errs = validateCompanyInline(form);
+    setErrors(errs);
+    if (Object.keys(errs).length > 0) return;
+    onSubmit(form);
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-center justify-center p-4 overflow-y-auto"
+      style={{ background: "rgba(26,24,22,0.45)" }}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      data-testid="company-form-modal"
+      onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}
+    >
+      <form
+        onSubmit={handleSubmit}
+        className="bg-bg rounded-2xl max-w-xl w-full p-7 my-8"
+        style={{ boxShadow: "0 16px 48px rgba(26,24,22,0.22)", border: "1px solid var(--rule)" }}
+      >
+        <div className="flex items-baseline justify-between mb-5">
+          <h2 id={titleId} className="text-lg text-ink" style={{ fontFamily: "var(--jp-serif)", fontWeight: 600 }}>
+            {isEdit ? "会社を編集" : "会社を追加"}
+          </h2>
+          <span className="font-serif-en text-xs uppercase text-wood-deep tracking-widest">Company</span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Field label="会社名 *" htmlFor="cf-name" error={visibleErrors.name} max={VALIDATION.Company.name.maxLength} value={form.name}>
+            <input id="cf-name" type="text" data-testid="company-name-input" value={form.name} onChange={update("name")}
+              maxLength={120}
+              aria-invalid={Boolean(visibleErrors.name)} aria-describedby={visibleErrors.name ? "cf-name-error" : undefined}
+              className="w-full px-3 py-2 rounded-lg border border-rule bg-bg text-sm focus-visible:outline focus-visible:outline-2 ring-rust" />
+          </Field>
+
+          <Field label="種別" htmlFor="cf-type">
+            <select id="cf-type" data-testid="company-type-select" value={form.type} onChange={update("type")}
+              className="w-full px-3 py-2 rounded-lg border border-rule bg-bg text-sm focus-visible:outline focus-visible:outline-2 ring-rust">
+              {Object.entries(COMPANY_TYPE_LABEL).map(([k, v]) => (
+                <option key={k} value={k}>{v}</option>
+              ))}
+            </select>
+          </Field>
+
+          <Field label="担当者 *" htmlFor="cf-contact" error={visibleErrors.contact} max={VALIDATION.Company.contact.maxLength} value={form.contact}>
+            <input id="cf-contact" type="text" data-testid="company-contact-input" value={form.contact} onChange={update("contact")}
+              maxLength={80}
+              aria-invalid={Boolean(visibleErrors.contact)} aria-describedby={visibleErrors.contact ? "cf-contact-error" : undefined}
+              className="w-full px-3 py-2 rounded-lg border border-rule bg-bg text-sm focus-visible:outline focus-visible:outline-2 ring-rust" />
+          </Field>
+
+          <Field label="ステータス" htmlFor="cf-status">
+            <select id="cf-status" data-testid="company-status-select" value={form.status} onChange={update("status")}
+              className="w-full px-3 py-2 rounded-lg border border-rule bg-bg text-sm focus-visible:outline focus-visible:outline-2 ring-rust">
+              {Object.entries(COMPANY_STATUS_LABEL).map(([k, v]) => (
+                <option key={k} value={k}>{v}</option>
+              ))}
+            </select>
+          </Field>
+
+          <Field label="電話番号" htmlFor="cf-phone" error={visibleErrors.phone} hint="数字・ハイフン・括弧・+のみ" max={VALIDATION.Company.phone.maxLength} value={form.phone}>
+            <input id="cf-phone" type="tel" data-testid="company-phone-input" value={form.phone} onChange={update("phone")}
+              maxLength={30}
+              aria-invalid={Boolean(visibleErrors.phone)} aria-describedby={visibleErrors.phone ? "cf-phone-error" : undefined}
+              className="w-full px-3 py-2 rounded-lg border border-rule bg-bg text-sm font-mono focus-visible:outline focus-visible:outline-2 ring-rust" />
+          </Field>
+
+          <Field label="メール" htmlFor="cf-email" error={visibleErrors.email} max={VALIDATION.Company.email.maxLength} value={form.email}>
+            <input id="cf-email" type="email" data-testid="company-email-input" value={form.email} onChange={update("email")}
+              maxLength={200}
+              aria-invalid={Boolean(visibleErrors.email)} aria-describedby={visibleErrors.email ? "cf-email-error" : undefined}
+              className="w-full px-3 py-2 rounded-lg border border-rule bg-bg text-sm font-mono focus-visible:outline focus-visible:outline-2 ring-rust" />
+          </Field>
+
+          <div className="md:col-span-2">
+            <Field label="メモ" htmlFor="cf-note" error={visibleErrors.note} max={VALIDATION.Company.note.maxLength} value={form.note}>
+              <textarea id="cf-note" data-testid="company-note-input" value={form.note} onChange={update("note")}
+                rows={3} maxLength={1000}
+                aria-invalid={Boolean(visibleErrors.note)} aria-describedby={visibleErrors.note ? "cf-note-error" : undefined}
+                className="w-full px-3 py-2 rounded-lg border border-rule bg-bg text-sm leading-relaxed focus-visible:outline focus-visible:outline-2 ring-rust" />
+            </Field>
+          </div>
+
+          {form.status === "rejected" && (
+            <div className="md:col-span-2">
+              <Field label="断り連絡メモ" htmlFor="cf-rejection" error={visibleErrors.rejectionNote} max={VALIDATION.Company.rejectionNote.maxLength} value={form.rejectionNote}>
+                <textarea id="cf-rejection" data-testid="company-rejection-note-input" value={form.rejectionNote} onChange={update("rejectionNote")}
+                  rows={2} maxLength={1000}
+                  className="w-full px-3 py-2 rounded-lg border border-rule bg-bg text-sm leading-relaxed focus-visible:outline focus-visible:outline-2 ring-rust" />
+              </Field>
+            </div>
+          )}
+        </div>
+
+        <div className="mt-7 flex justify-end gap-3">
+          <button type="button" onClick={onClose} data-testid="company-cancel-button"
+            className="px-5 py-2 rounded-full border border-rule text-ink-soft hover:bg-paper focus-visible:outline focus-visible:outline-2 ring-rust transition">
+            キャンセル
+          </button>
+          <button type="submit" data-testid="save-company-button" disabled={saveDisabled}
+            className="px-6 py-2 rounded-full bg-rust text-white hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 ring-rust transition">
+            {isEdit ? "更新" : "登録"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+// ---- 会社カード ----
+
+function CompanyCard({ company, meetingsCount, onEdit, onDelete, onClick }) {
+  return (
+    <article
+      data-testid="company-card"
+      className="bg-paper border border-rule rounded-2xl p-5 hover:border-wood-deep transition group cursor-pointer"
+      onClick={onClick}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } }}
+      role="button"
+      tabIndex={0}
+    >
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div className="min-w-0 flex-1">
+          <h3 className="text-base text-ink truncate" style={{ fontFamily: "var(--jp-serif)", fontWeight: 600 }}>
+            {company.name}
+          </h3>
+          <p className="font-serif-en text-[10px] uppercase tracking-widest text-wood-deep mt-0.5">
+            {COMPANY_TYPE_LABEL[company.type] || company.type}
+          </p>
+        </div>
+        <StatusBadge status={company.status} testId={`company-card-status-${company.id}`} />
+      </div>
+
+      <dl className="text-sm text-ink-soft space-y-1">
+        <div className="flex gap-2">
+          <dt className="text-ink-soft/70 w-16 shrink-0">担当</dt>
+          <dd className="text-ink truncate">{company.contact}</dd>
+        </div>
+        {company.phone && (
+          <div className="flex gap-2">
+            <dt className="text-ink-soft/70 w-16 shrink-0">電話</dt>
+            <dd className="font-mono text-xs text-ink truncate">{company.phone}</dd>
+          </div>
+        )}
+        {company.email && (
+          <div className="flex gap-2">
+            <dt className="text-ink-soft/70 w-16 shrink-0">メール</dt>
+            <dd className="font-mono text-xs text-ink truncate">{company.email}</dd>
+          </div>
+        )}
+      </dl>
+
+      {company.note && (
+        <p className="mt-3 text-xs text-ink-soft leading-relaxed line-clamp-2">{company.note}</p>
+      )}
+      {company.status === "rejected" && company.rejectionNote && (
+        <p className="mt-3 text-xs text-ink-soft leading-relaxed border-l-2 border-rule pl-2">
+          <span className="font-serif-en uppercase text-[10px] mr-1 opacity-70">Note</span>
+          {company.rejectionNote}
+        </p>
+      )}
+
+      <div className="mt-4 flex items-center justify-between border-t border-rule/60 pt-3">
+        <span className="text-[11px] text-ink-soft">
+          打ち合わせ <span className="font-mono text-ink">{meetingsCount ?? 0}</span> 件
+        </span>
+        <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
+          <button type="button" onClick={onEdit} data-testid={`edit-company-button-${company.id}`}
+            className="text-xs px-3 py-1 rounded-full border border-rule text-ink-soft hover:text-ink hover:border-wood-deep focus-visible:outline focus-visible:outline-2 ring-rust transition">
+            編集
+          </button>
+          <button type="button" onClick={onDelete} data-testid={`delete-company-button-${company.id}`}
+            className="text-xs px-3 py-1 rounded-full border border-rule text-rust hover:bg-rust hover:text-white focus-visible:outline focus-visible:outline-2 ring-rust transition">
+            削除
+          </button>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+// ---- 会社詳細ページ ----
+
+function CompanyDetailPage({ company, onClose, onEdit }) {
+  const [tab, setTab] = useState("info"); // info | meetings | specs
+  if (!company) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-30 bg-bg overflow-y-auto"
+      data-testid="company-detail-page"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`${company.name}の詳細`}
+    >
+      <header className="sticky top-0 bg-bg border-b border-rule z-10">
+        <div className="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between gap-4">
+          <button type="button" onClick={onClose} data-testid="company-detail-close"
+            className="text-sm text-ink-soft hover:text-ink flex items-center gap-1 focus-visible:outline focus-visible:outline-2 ring-rust rounded">
+            <span>←</span> 会社一覧
+          </button>
+          <button type="button" onClick={onEdit} data-testid="company-detail-edit"
+            className="px-4 py-1.5 rounded-full text-xs bg-rust text-white hover:opacity-90 focus-visible:outline focus-visible:outline-2 ring-rust transition">
+            編集
+          </button>
+        </div>
+      </header>
+
+      <main className="max-w-5xl mx-auto px-4 py-6">
+        <div className="flex items-baseline gap-3 mb-2">
+          <h1 className="text-2xl text-ink" style={{ fontFamily: "var(--jp-serif)", fontWeight: 700 }}>
+            {company.name}
+          </h1>
+          <span className="font-serif-en text-xs uppercase tracking-widest text-wood-deep">
+            {COMPANY_TYPE_LABEL[company.type] || company.type}
+          </span>
+        </div>
+        <div className="mb-6"><StatusBadge status={company.status} /></div>
+
+        <nav className="border-b border-rule mb-6" role="tablist" aria-label="詳細タブ">
+          {[
+            { id: "info",     label: "基本情報" },
+            { id: "meetings", label: "打ち合わせ" },
+            { id: "specs",    label: "仕様値" },
+          ].map((t) => {
+            const active = tab === t.id;
+            return (
+              <button key={t.id} type="button" role="tab" aria-selected={active}
+                data-testid={`company-detail-tab-${t.id}`}
+                onClick={() => setTab(t.id)}
+                className={"px-5 py-3 text-sm border-b-2 mr-1 transition focus-visible:outline focus-visible:outline-2 ring-rust " +
+                  (active ? "text-ink" : "border-transparent text-ink-soft hover:text-ink")}
+                style={{
+                  fontFamily: "var(--jp-serif)",
+                  fontWeight: active ? 600 : 500,
+                  letterSpacing: "0.08em",
+                  borderBottomColor: active ? "var(--rust)" : "transparent",
+                }}>
+                {t.label}
+              </button>
+            );
+          })}
+        </nav>
+
+        {tab === "info" && (
+          <dl className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4 text-sm">
+            <DetailRow label="担当者">{company.contact}</DetailRow>
+            <DetailRow label="電話番号">{company.phone || "—"}</DetailRow>
+            <DetailRow label="メール">{company.email || "—"}</DetailRow>
+            <DetailRow label="登録日">{(company.createdAt || "").slice(0, 10)}</DetailRow>
+            {company.note && (
+              <div className="md:col-span-2">
+                <DetailRow label="メモ" wrap>
+                  <p className="whitespace-pre-line leading-relaxed">{company.note}</p>
+                </DetailRow>
+              </div>
+            )}
+            {company.status === "rejected" && company.rejectionNote && (
+              <div className="md:col-span-2">
+                <DetailRow label="断り連絡メモ" wrap>
+                  <p className="whitespace-pre-line leading-relaxed">{company.rejectionNote}</p>
+                </DetailRow>
+              </div>
+            )}
+          </dl>
+        )}
+        {tab === "meetings" && (
+          <EmptyState icon="📅" title="打ち合わせは Sprint 3 で表示されます"
+            description="この会社との打ち合わせ一覧を summary 先頭100文字省略で表示する予定です。" />
+        )}
+        {tab === "specs" && (
+          <EmptyState icon="📋" title="仕様値は Sprint 2 で表示されます"
+            description="この会社の仕様値を一覧表示する予定です。" />
+        )}
+      </main>
+    </div>
+  );
+}
+
+function DetailRow({ label, children, wrap }) {
+  return (
+    <div className={wrap ? "flex flex-col gap-1" : "flex gap-3 items-baseline"}>
+      <dt className="text-xs text-ink-soft shrink-0" style={{ letterSpacing: "0.08em" }}>{label}</dt>
+      <dd className="text-ink">{children}</dd>
+    </div>
+  );
+}
+
+// ---- 会社一覧ビュー (タブのコンテンツ) ----
+
+const STATUS_FILTERS = [
+  { id: "all",          label: "すべて" },
+  { id: "considering",  label: "検討中" },
+  { id: "candidate",    label: "候補" },
+  { id: "contracted",   label: "契約済" },
+  { id: "rejected",     label: "落選" },
+];
+
+function CompaniesView({ saveDisabled }) {
+  const showToast = useToast();
+  const showConfirm = useConfirm();
+
+  const [companies, setCompanies] = useState(null); // null = loading
+  const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [detailCompany, setDetailCompany] = useState(null);
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [showContracted, setShowContracted] = useState(false);
+
+  const reload = useCallback(async () => {
+    const list = await loadCompaniesFromStorage();
+    setCompanies(list);
+  }, []);
+
+  useEffect(() => { reload(); }, [reload]);
+
+  const handleAdd = () => { setEditing(null); setShowForm(true); };
+  const handleEdit = (company) => { setEditing(company); setShowForm(true); };
+
+  const handleSubmit = async (form) => {
+    const all = companies || [];
+    const duplicate = isDuplicateCompanyNameInline(form.name, all, editing?.id);
+    if (duplicate) {
+      showToast("warning", "同じ名前の会社が既に登録されています");
+      // E11: 登録はブロックしない
+    }
+    try {
+      const next = editing
+        ? all.map((c) => c.id === editing.id ? updateCompanyEntity(editing, form) : c)
+        : [...all, createCompanyEntity(form)];
+      await saveCompaniesToStorage(next, showToast);
+      await reload();
+      setShowForm(false);
+      setEditing(null);
+      showToast("success", editing ? "会社情報を更新しました" : "会社を登録しました");
+    } catch (e) {
+      console.error(e);
+      // saveWithCapacityCheck 側で error Toast は出ている
+    }
+  };
+
+  const handleDelete = async (company) => {
+    const ok = await showConfirm(
+      `「${company.name}」を削除しますか？`,
+      "論理削除されます。関連する打ち合わせ・変更ログは保持され、設定画面のアーカイブで参照できます。"
+    );
+    if (!ok) return;
+    try {
+      const next = (companies || []).map((c) =>
+        c.id === company.id ? { ...c, deletedAt: new Date().toISOString() } : c
+      );
+      await saveCompaniesToStorage(next, showToast);
+      await reload();
+      showToast("success", "会社を削除しました");
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  if (companies === null) return <Spinner label="会社を読み込み中..." />;
+
+  const active = companies.filter((c) => !c.deletedAt);
+  const filtered = statusFilter === "all" ? active : active.filter((c) => c.status === statusFilter);
+  const others = filtered.filter((c) => c.status !== "contracted");
+  const contracted = filtered.filter((c) => c.status === "contracted");
+
+  return (
+    <div data-testid="companies-view">
+      <div className="flex items-baseline justify-between mb-5 gap-3 flex-wrap">
+        <div>
+          <h2 className="text-xl text-ink" style={{ fontFamily: "var(--jp-serif)", fontWeight: 600 }}>
+            会社管理
+          </h2>
+          <p className="font-serif-en text-[11px] uppercase tracking-widest text-wood-deep mt-1">
+            Companies / {active.length} active
+          </p>
+        </div>
+        <button type="button" onClick={handleAdd} data-testid="add-company-button" disabled={saveDisabled}
+          className="px-5 py-2 rounded-full bg-rust text-white text-sm hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 ring-rust transition">
+          + 会社を追加
+        </button>
+      </div>
+
+      {active.length > 0 && (
+        <div className="flex flex-wrap gap-2 mb-6" role="tablist" aria-label="ステータスフィルター">
+          {STATUS_FILTERS.map((f) => {
+            const sel = statusFilter === f.id;
+            const count = f.id === "all"
+              ? active.length
+              : active.filter((c) => c.status === f.id).length;
+            return (
+              <button key={f.id} type="button" role="tab" aria-selected={sel}
+                data-testid={`company-filter-${f.id}`}
+                onClick={() => setStatusFilter(f.id)}
+                className={"px-4 py-1.5 rounded-full text-xs border transition focus-visible:outline focus-visible:outline-2 ring-rust " +
+                  (sel
+                    ? "bg-ink text-bg border-ink"
+                    : "bg-bg text-ink-soft border-rule hover:text-ink hover:border-wood-deep")}
+                style={{ letterSpacing: "0.08em" }}>
+                {f.label} <span className="font-mono ml-1 opacity-70">{count}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {active.length === 0 && (
+        <EmptyState
+          icon="🏢"
+          title="検討中の会社を登録してください"
+          description="ハウスメーカー・工務店を登録して、打ち合わせと仕様比較を始めましょう。"
+          action={{ label: "+ 会社を追加", onClick: handleAdd, testId: "empty-add-company-button" }}
+          testId="companies-empty-state"
+        />
+      )}
+
+      {others.length > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+          {others.map((c) => (
+            <CompanyCard key={c.id} company={c}
+              meetingsCount={0}
+              onClick={() => setDetailCompany(c)}
+              onEdit={() => handleEdit(c)}
+              onDelete={() => handleDelete(c)} />
+          ))}
+        </div>
+      )}
+
+      {contracted.length > 0 && (
+        <section className="mt-8">
+          <button type="button"
+            onClick={() => setShowContracted((v) => !v)}
+            data-testid="toggle-contracted-companies"
+            className="flex items-center gap-2 text-sm text-ink-soft hover:text-ink mb-4 focus-visible:outline focus-visible:outline-2 ring-rust rounded">
+            <span className="font-serif-en uppercase tracking-widest text-[11px] text-wood-deep">Contracted</span>
+            <span style={{ fontFamily: "var(--jp-serif)" }}>契約済 ({contracted.length})</span>
+            <span aria-hidden="true">{showContracted ? "▼" : "▶"}</span>
+          </button>
+          {showContracted && (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+              {contracted.map((c) => (
+                <CompanyCard key={c.id} company={c}
+                  meetingsCount={0}
+                  onClick={() => setDetailCompany(c)}
+                  onEdit={() => handleEdit(c)}
+                  onDelete={() => handleDelete(c)} />
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
+      {showForm && (
+        <CompanyFormModal
+          existingCompanies={companies}
+          initial={editing}
+          onSubmit={handleSubmit}
+          onClose={() => { setShowForm(false); setEditing(null); }}
+          saveDisabled={saveDisabled}
+        />
+      )}
+
+      {detailCompany && (
+        <CompanyDetailPage
+          company={detailCompany}
+          onClose={() => setDetailCompany(null)}
+          onEdit={() => {
+            const c = detailCompany;
+            setDetailCompany(null);
+            setEditing(c);
+            setShowForm(true);
+          }}
+        />
+      )}
+    </div>
+  );
+}
 
 // ===== 5. 仕様比較コンポーネント =====
 // Sprint 2 で実装
@@ -964,7 +1623,9 @@ function AppInner() {
       <TabNavigation currentTab={currentTab} onTabChange={setCurrentTab} />
 
       <main className="max-w-7xl mx-auto px-4 py-6" data-testid="main-content">
-        <TabPlaceholder tabId={currentTab} />
+        {currentTab === "companies"
+          ? <CompaniesView saveDisabled={saveDisabled} />
+          : <TabPlaceholder tabId={currentTab} />}
 
         {/* 開発用デバッグパネル（Sprint 0 のみ） */}
         <DevDebugPanel

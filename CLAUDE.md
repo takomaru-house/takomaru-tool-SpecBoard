@@ -404,13 +404,14 @@ const DECISION_STATUS_LABEL = {
 ```javascript
 const VALIDATION = {
   Company: {
-    name:    { required: true,  maxLength: 50 },
-    contact: { required: true,  maxLength: 30 },
-    phone:   { required: false, maxLength: 15,
-               pattern: /^[\d\-\+\(\)\s]*$/ },
-    email:   { required: false, maxLength: 100,
-               pattern: /^[^\s@]+@[^\s@]+\.[^\s@]+$/ },
-    note:    { required: false, maxLength: 500 },
+    name:          { required: true,  maxLength: 50 },
+    contact:       { required: true,  maxLength: 30 },
+    phone:         { required: false, maxLength: 15,
+                     pattern: /^[\d\-\+\(\)\s]*$/ },
+    email:         { required: false, maxLength: 100,
+                     pattern: /^[^\s@]+@[^\s@]+\.[^\s@]+$/ },
+    note:          { required: false, maxLength: 500 },
+    rejectionNote: { required: false, maxLength: 500 },
   },
   Meeting: {
     date:      { required: true,  format: "YYYY-MM-DD" },
