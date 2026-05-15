@@ -1316,7 +1316,1068 @@ export function CompaniesView({ saveDisabled }) {
 }
 
 // ===== 5. 仕様比較コンポーネント =====
-// Sprint 2 で実装
+
+// ---- Sprint 2 内部ユーティリティ (src/utils/category.js / specItem.js / specItemNote.js / changeLog.js のミラー) ----
+
+function normalizeCategoryNameInline(name) {
+  return String(name ?? "").trim().toLowerCase();
+}
+
+function isDuplicateCategoryNameInline(name, categories, excludeId = null) {
+  const normalized = normalizeCategoryNameInline(name);
+  if (normalized.length === 0) return false;
+  return categories.some(
+    (c) => !c.deletedAt && c.id !== excludeId && c.normalizedName === normalized
+  );
+}
+
+function validateCategoryInline(input, existing = [], excludeId = null) {
+  const errors = {};
+  const name = String(input?.name ?? "");
+  const trimmed = name.trim();
+  if (trimmed.length === 0) return { name: "カテゴリ名は必須です" };
+  if (name.length > 30) return { name: "30文字以内で入力してください" };
+  if (isDuplicateCategoryNameInline(name, existing, excludeId)) {
+    return { name: "同じ名前のカテゴリが既に存在します" };
+  }
+  return errors;
+}
+
+function validateSpecItemInline(input) {
+  const errors = {};
+  const name = String(input?.name ?? "");
+  if (name.trim().length === 0) errors.name = "項目名は必須です";
+  else if (name.length > 50) errors.name = "50文字以内で入力してください";
+  if (!input?.categoryId) errors.categoryId = "カテゴリを選択してください";
+  return errors;
+}
+
+function validateSpecValueInline(value) {
+  if (value !== undefined && value !== null && String(value).length > 200) {
+    return { value: "200文字以内で入力してください" };
+  }
+  return {};
+}
+
+function validateSpecItemNoteInline(input) {
+  const note = String(input?.note ?? "");
+  if (note.trim().length === 0) return { note: "メモは必須です" };
+  if (note.length > 200) return { note: "200文字以内で入力してください" };
+  return {};
+}
+
+function moveSpecItemInline(items, id, direction) {
+  const target = items.find((i) => i.id === id);
+  if (!target) return items;
+  const sibling = items
+    .filter((i) => i.categoryId === target.categoryId && !i.deletedAt)
+    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+  const idx = sibling.findIndex((i) => i.id === id);
+  if (idx === -1) return items;
+  const swapIdx = direction === "up" ? idx - 1 : idx + 1;
+  if (swapIdx < 0 || swapIdx >= sibling.length) return items;
+  const a = sibling[idx];
+  const b = sibling[swapIdx];
+  return items.map((item) => {
+    if (item.id === a.id) return { ...item, sortOrder: b.sortOrder ?? 0 };
+    if (item.id === b.id) return { ...item, sortOrder: a.sortOrder ?? 0 };
+    return item;
+  });
+}
+
+function specItemsByCategoryInline(items, categoryId) {
+  return items
+    .filter((i) => i.categoryId === categoryId && !i.deletedAt)
+    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+}
+
+function nextSortOrderForCategoryInline(items, categoryId) {
+  const sibling = items.filter((i) => i.categoryId === categoryId);
+  if (sibling.length === 0) return 0;
+  return Math.max(...sibling.map((i) => i.sortOrder ?? 0)) + 1;
+}
+
+function findNoteInline(notes, specItemId, companyId) {
+  return notes.find((n) => n.specItemId === specItemId && n.companyId === companyId);
+}
+
+function buildChangeLogInline({ specItemId, companyId, previousValue, newValue, meetingId, reason }) {
+  const now = new Date().toISOString();
+  return {
+    id: newId(),
+    specItemId,
+    companyId,
+    previousValue: String(previousValue ?? ""),
+    newValue: String(newValue ?? ""),
+    meetingId: meetingId || undefined,
+    reason: reason || undefined,
+    changedAt: now,
+    createdAt: now,
+  };
+}
+
+// ---- ストレージ I/O ----
+
+async function loadCategoriesFromStorage() {
+  const raw = await storage.getItem(STORAGE_KEYS.CATEGORIES);
+  if (!raw) return [];
+  try { const v = JSON.parse(raw); return Array.isArray(v) ? v : []; } catch { return []; }
+}
+async function loadSpecItemsFromStorage() {
+  const raw = await storage.getItem(STORAGE_KEYS.SPEC_ITEMS);
+  if (!raw) return [];
+  try { const v = JSON.parse(raw); return Array.isArray(v) ? v : []; } catch { return []; }
+}
+async function loadSpecItemNotesFromStorage() {
+  const raw = await storage.getItem(STORAGE_KEYS.SPEC_ITEM_NOTES);
+  if (!raw) return [];
+  try { const v = JSON.parse(raw); return Array.isArray(v) ? v : []; } catch { return []; }
+}
+async function loadChangeLogsFromStorage() {
+  const raw = await storage.getItem(STORAGE_KEYS.CHANGE_LOGS);
+  if (!raw) return [];
+  try { const v = JSON.parse(raw); return Array.isArray(v) ? v : []; } catch { return []; }
+}
+
+// ---- カテゴリ管理モーダル ----
+
+export function CategoryManager({ categories, onClose, onSave, onDelete, saveDisabled }) {
+  const showConfirm = useConfirm();
+  const [name, setName] = useState("");
+  const [error, setError] = useState(null);
+  const [editingId, setEditingId] = useState(null);
+
+  // ESC で閉じる
+  useEffect(() => {
+    const handler = (e) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    const errors = validateCategoryInline({ name }, categories, editingId);
+    if (errors.name) { setError(errors.name); return; }
+    onSave({ id: editingId, name });
+    setName(""); setError(null); setEditingId(null);
+  };
+
+  const handleEdit = (cat) => { setEditingId(cat.id); setName(cat.name); setError(null); };
+  const handleDelete = async (cat) => {
+    const ok = await showConfirm(
+      `カテゴリ「${cat.name}」を削除しますか？`,
+      "論理削除されます。所属する仕様項目はそのまま残ります (アーカイブで確認可)。"
+    );
+    if (ok) onDelete(cat.id);
+  };
+
+  const active = categories.filter((c) => !c.deletedAt).sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-center justify-center p-4 overflow-y-auto"
+      style={{ background: "rgba(26,24,22,0.45)" }}
+      role="dialog" aria-modal="true" aria-labelledby="cat-manager-title"
+      data-testid="category-manager-modal"
+    >
+      <div
+        className="bg-bg rounded-2xl max-w-lg w-full p-7 my-8"
+        style={{ boxShadow: "0 16px 48px rgba(26,24,22,0.22)", border: "1px solid var(--rule)" }}
+      >
+        <div className="flex items-baseline justify-between mb-5">
+          <h2 id="cat-manager-title" className="text-lg text-ink" style={{ fontFamily: "var(--jp-serif)", fontWeight: 600 }}>
+            カテゴリ管理
+          </h2>
+          <span className="font-serif-en text-xs uppercase text-wood-deep tracking-widest">Categories</span>
+        </div>
+
+        <form onSubmit={handleSubmit} noValidate className="mb-6">
+          <label htmlFor="cat-name-input" className="text-xs text-ink-soft" style={{ letterSpacing: "0.08em" }}>
+            {editingId ? "カテゴリ名を編集" : "新規カテゴリ名"}
+          </label>
+          <div className="flex gap-2 mt-1">
+            <input
+              id="cat-name-input"
+              type="text"
+              data-testid="category-name-input"
+              value={name}
+              onChange={(e) => { setName(e.target.value); setError(null); }}
+              maxLength={60}
+              className="flex-1 px-3 py-2 rounded-lg border border-rule bg-bg text-sm focus-visible:outline focus-visible:outline-2 ring-rust"
+            />
+            <button type="submit" data-testid="save-category-button" disabled={saveDisabled}
+              className="px-5 py-2 rounded-full bg-rust text-white text-sm hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed">
+              {editingId ? "更新" : "追加"}
+            </button>
+            {editingId && (
+              <button type="button"
+                onClick={() => { setEditingId(null); setName(""); setError(null); }}
+                className="px-3 py-2 rounded-full border border-rule text-xs text-ink-soft hover:text-ink">
+                取消
+              </button>
+            )}
+          </div>
+          {error && <p role="alert" className="mt-2 text-xs text-rust">{error}</p>}
+        </form>
+
+        <ul className="divide-y divide-rule" data-testid="category-list">
+          {active.map((c) => (
+            <li key={c.id} className="py-2 flex items-center justify-between gap-3" data-testid={`category-row-${c.id}`}>
+              <span className="text-sm text-ink">{c.name}</span>
+              <div className="flex gap-1">
+                <button type="button"
+                  data-testid={`category-edit-${c.id}`}
+                  onClick={() => handleEdit(c)}
+                  className="text-xs px-3 py-1 rounded-full border border-rule text-ink-soft hover:text-ink">
+                  編集
+                </button>
+                <button type="button"
+                  data-testid={`category-delete-${c.id}`}
+                  onClick={() => handleDelete(c)}
+                  className="text-xs px-3 py-1 rounded-full border border-rule text-rust hover:bg-rust hover:text-white">
+                  削除
+                </button>
+              </div>
+            </li>
+          ))}
+          {active.length === 0 && (
+            <li className="py-4 text-sm text-ink-soft text-center">カテゴリがありません</li>
+          )}
+        </ul>
+
+        <div className="mt-6 flex justify-end">
+          <button type="button" onClick={onClose} data-testid="category-manager-close"
+            className="px-5 py-2 rounded-full border border-rule text-ink-soft hover:bg-paper">
+            閉じる
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---- 仕様項目追加モーダル ----
+
+export function ItemAddModal({ categories, onSubmit, onClose, saveDisabled }) {
+  const NEW_CATEGORY = "__new_category__";
+  const [form, setForm] = useState({ name: "", categoryId: categories[0]?.id || NEW_CATEGORY, newCategoryName: "" });
+  const [errors, setErrors] = useState({});
+
+  useEffect(() => {
+    const handler = (e) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    const itemErrors = validateSpecItemInline({ name: form.name, categoryId: form.categoryId || "x" });
+    let categoryError = null;
+    if (form.categoryId === NEW_CATEGORY) {
+      const catErrors = validateCategoryInline({ name: form.newCategoryName }, categories);
+      if (catErrors.name) categoryError = catErrors.name;
+    }
+    const combined = { ...itemErrors };
+    if (categoryError) combined.newCategoryName = categoryError;
+    delete combined.categoryId; // category は別フィールドで判定
+    if (form.categoryId === NEW_CATEGORY && !form.newCategoryName.trim()) {
+      combined.newCategoryName = "カテゴリ名は必須です";
+    }
+    setErrors(combined);
+    if (Object.keys(combined).length > 0) return;
+
+    onSubmit({
+      name: form.name,
+      categoryId: form.categoryId === NEW_CATEGORY ? null : form.categoryId,
+      newCategoryName: form.categoryId === NEW_CATEGORY ? form.newCategoryName : null,
+    });
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-center justify-center p-4 overflow-y-auto"
+      style={{ background: "rgba(26,24,22,0.45)" }}
+      role="dialog" aria-modal="true" aria-labelledby="item-add-title"
+      data-testid="item-add-modal"
+    >
+      <form onSubmit={handleSubmit} noValidate
+        className="bg-bg rounded-2xl max-w-lg w-full p-7 my-8"
+        style={{ boxShadow: "0 16px 48px rgba(26,24,22,0.22)", border: "1px solid var(--rule)" }}>
+        <div className="flex items-baseline justify-between mb-5">
+          <h2 id="item-add-title" className="text-lg text-ink" style={{ fontFamily: "var(--jp-serif)", fontWeight: 600 }}>
+            仕様項目を追加
+          </h2>
+          <span className="font-serif-en text-xs uppercase text-wood-deep tracking-widest">Spec Item</span>
+        </div>
+
+        <Field label="項目名 *" htmlFor="si-name" error={errors.name} max={50} value={form.name}>
+          <input id="si-name" type="text" data-testid="spec-item-name-input"
+            value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+            maxLength={120}
+            className="w-full px-3 py-2 rounded-lg border border-rule bg-bg text-sm focus-visible:outline focus-visible:outline-2 ring-rust" />
+        </Field>
+
+        <div className="mt-4">
+          <label htmlFor="si-cat" className="text-xs text-ink-soft" style={{ letterSpacing: "0.08em" }}>カテゴリ *</label>
+          <select id="si-cat" data-testid="spec-item-category-select"
+            value={form.categoryId}
+            onChange={(e) => setForm((f) => ({ ...f, categoryId: e.target.value }))}
+            className="mt-1 w-full px-3 py-2 rounded-lg border border-rule bg-bg text-sm focus-visible:outline focus-visible:outline-2 ring-rust">
+            {categories.filter((c) => !c.deletedAt).sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+              .map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            <option value={NEW_CATEGORY}>+ 新規カテゴリを作成</option>
+          </select>
+        </div>
+
+        {form.categoryId === NEW_CATEGORY && (
+          <div className="mt-4">
+            <Field label="新規カテゴリ名 *" htmlFor="si-newcat" error={errors.newCategoryName} max={30} value={form.newCategoryName}>
+              <input id="si-newcat" type="text" data-testid="new-category-name-input"
+                value={form.newCategoryName}
+                onChange={(e) => setForm((f) => ({ ...f, newCategoryName: e.target.value }))}
+                maxLength={60}
+                className="w-full px-3 py-2 rounded-lg border border-rule bg-bg text-sm focus-visible:outline focus-visible:outline-2 ring-rust" />
+            </Field>
+          </div>
+        )}
+
+        <div className="mt-6 flex justify-end gap-3">
+          <button type="button" onClick={onClose} data-testid="item-add-cancel"
+            className="px-5 py-2 rounded-full border border-rule text-ink-soft hover:bg-paper">
+            キャンセル
+          </button>
+          <button type="submit" data-testid="save-spec-item-button" disabled={saveDisabled}
+            className="px-6 py-2 rounded-full bg-rust text-white text-sm hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed">
+            追加
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+// ---- 仕様項目編集モーダル (名称のみ) ----
+
+function SpecItemEditModal({ specItem, onSubmit, onClose, saveDisabled }) {
+  const [name, setName] = useState(specItem.name);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const handler = (e) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    const errors = validateSpecItemInline({ name, categoryId: specItem.categoryId });
+    if (errors.name) { setError(errors.name); return; }
+    onSubmit({ ...specItem, name });
+  };
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center p-4"
+      style={{ background: "rgba(26,24,22,0.45)" }}
+      role="dialog" aria-modal="true" data-testid="spec-item-edit-modal">
+      <form onSubmit={handleSubmit} noValidate
+        className="bg-bg rounded-2xl max-w-md w-full p-6"
+        style={{ boxShadow: "0 16px 48px rgba(26,24,22,0.22)", border: "1px solid var(--rule)" }}>
+        <h2 className="text-lg text-ink mb-4" style={{ fontFamily: "var(--jp-serif)", fontWeight: 600 }}>
+          仕様項目を編集
+        </h2>
+        <Field label="項目名" htmlFor="sie-name" error={error} max={50} value={name}>
+          <input id="sie-name" type="text" data-testid="spec-item-edit-name-input"
+            value={name} onChange={(e) => { setName(e.target.value); setError(null); }}
+            maxLength={120}
+            className="w-full px-3 py-2 rounded-lg border border-rule bg-bg text-sm focus-visible:outline focus-visible:outline-2 ring-rust" />
+        </Field>
+        <div className="mt-5 flex justify-end gap-3">
+          <button type="button" onClick={onClose}
+            className="px-5 py-2 rounded-full border border-rule text-ink-soft hover:bg-paper">キャンセル</button>
+          <button type="submit" data-testid="save-spec-item-edit-button" disabled={saveDisabled}
+            className="px-6 py-2 rounded-full bg-rust text-white text-sm hover:opacity-90 disabled:opacity-40">更新</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+// ---- 仕様値セル編集モーダル ----
+
+export function SpecCellEditor({ specItem, company, currentValue, onSubmit, onClose, saveDisabled }) {
+  const [value, setValue] = useState(currentValue?.value ?? "");
+  const [reason, setReason] = useState("");
+  const [meetingId, setMeetingId] = useState(currentValue?.meetingId ?? "");
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const handler = (e) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    const errors = validateSpecValueInline(value);
+    if (errors.value) { setError(errors.value); return; }
+    onSubmit({ value: value.trim(), reason: reason.trim() || undefined, meetingId: meetingId || undefined });
+  };
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center p-4 overflow-y-auto"
+      style={{ background: "rgba(26,24,22,0.45)" }}
+      role="dialog" aria-modal="true" aria-labelledby="cell-editor-title"
+      data-testid="spec-cell-editor-modal">
+      <form onSubmit={handleSubmit} noValidate
+        className="bg-bg rounded-2xl max-w-lg w-full p-7 my-8"
+        style={{ boxShadow: "0 16px 48px rgba(26,24,22,0.22)", border: "1px solid var(--rule)" }}>
+        <div className="flex items-baseline justify-between mb-4">
+          <h2 id="cell-editor-title" className="text-lg text-ink" style={{ fontFamily: "var(--jp-serif)", fontWeight: 600 }}>
+            {company.name} / {specItem.name}
+          </h2>
+          <span className="font-serif-en text-xs uppercase text-wood-deep tracking-widest">Spec Value</span>
+        </div>
+
+        <Field label="現在の値" htmlFor="sce-value" error={error} max={200} value={value}>
+          <textarea id="sce-value" data-testid="spec-cell-value-input"
+            value={value} onChange={(e) => { setValue(e.target.value); setError(null); }}
+            rows={3} maxLength={400}
+            className="w-full px-3 py-2 rounded-lg border border-rule bg-bg text-sm leading-relaxed focus-visible:outline focus-visible:outline-2 ring-rust" />
+        </Field>
+
+        <Field label="変更理由 (ChangeLog に記録)" htmlFor="sce-reason" max={500} value={reason}>
+          <input id="sce-reason" type="text" data-testid="spec-cell-reason-input"
+            value={reason} onChange={(e) => setReason(e.target.value)} maxLength={1000}
+            className="w-full px-3 py-2 rounded-lg border border-rule bg-bg text-sm focus-visible:outline focus-visible:outline-2 ring-rust" />
+        </Field>
+
+        <div className="mt-5 flex justify-end gap-3">
+          <button type="button" onClick={onClose} data-testid="spec-cell-cancel-button"
+            className="px-5 py-2 rounded-full border border-rule text-ink-soft hover:bg-paper">キャンセル</button>
+          <button type="submit" data-testid="save-spec-cell-button" disabled={saveDisabled}
+            className="px-6 py-2 rounded-full bg-rust text-white text-sm hover:opacity-90 disabled:opacity-40">保存</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+// ---- 仕様項目メモポップオーバー ----
+
+export function SpecItemNotePopover({ specItem, company, existingNote, onSubmit, onDelete, onClose, saveDisabled }) {
+  const showConfirm = useConfirm();
+  const [note, setNote] = useState(existingNote?.note ?? "");
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const handler = (e) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    const errors = validateSpecItemNoteInline({ note, specItemId: specItem.id, companyId: company.id });
+    if (errors.note) { setError(errors.note); return; }
+    onSubmit({ note });
+  };
+
+  const handleDelete = async () => {
+    const ok = await showConfirm(
+      "評価メモを削除しますか？",
+      "物理削除されます。再追加は可能です。"
+    );
+    if (ok) onDelete();
+  };
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center p-4"
+      style={{ background: "rgba(26,24,22,0.45)" }}
+      role="dialog" aria-modal="true" data-testid="spec-item-note-popover">
+      <form onSubmit={handleSubmit} noValidate
+        className="bg-bg rounded-2xl max-w-md w-full p-6"
+        style={{ boxShadow: "0 16px 48px rgba(26,24,22,0.22)", border: "1px solid var(--rule)" }}>
+        <div className="flex items-baseline justify-between mb-4">
+          <h2 className="text-base text-ink" style={{ fontFamily: "var(--jp-serif)", fontWeight: 600 }}>
+            評価メモ 📝
+          </h2>
+          <span className="font-serif-en text-xs uppercase text-wood-deep tracking-widest">Note</span>
+        </div>
+        <p className="text-xs text-ink-soft mb-3">{company.name} / {specItem.name}</p>
+        <Field label="メモ" htmlFor="sin-note" error={error} max={200} value={note}>
+          <textarea id="sin-note" data-testid="spec-item-note-input"
+            value={note} onChange={(e) => { setNote(e.target.value); setError(null); }}
+            rows={3} maxLength={400}
+            className="w-full px-3 py-2 rounded-lg border border-rule bg-bg text-sm leading-relaxed focus-visible:outline focus-visible:outline-2 ring-rust" />
+        </Field>
+        <div className="mt-5 flex justify-between gap-3">
+          {existingNote && (
+            <button type="button" data-testid="delete-spec-note-button"
+              onClick={handleDelete}
+              className="px-4 py-1.5 rounded-full border border-rule text-rust text-xs hover:bg-rust hover:text-white">
+              削除
+            </button>
+          )}
+          <div className="flex gap-3 ml-auto">
+            <button type="button" onClick={onClose}
+              className="px-5 py-2 rounded-full border border-rule text-ink-soft hover:bg-paper">キャンセル</button>
+            <button type="submit" data-testid="save-spec-note-button" disabled={saveDisabled}
+              className="px-6 py-2 rounded-full bg-rust text-white text-sm hover:opacity-90 disabled:opacity-40">保存</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+// ---- 仕様セル (テーブルの1セル) ----
+
+function SpecCell({ specItem, company, value, note, onEdit, onNote }) {
+  const hasValue = value && String(value.value ?? "").length > 0;
+  return (
+    <td className="border border-rule align-top p-2 min-w-[180px]" data-testid={`spec-cell-${specItem.id}-${company.id}`}>
+      <div className="flex flex-col gap-1">
+        {hasValue ? (
+          <div className="text-sm text-ink leading-relaxed whitespace-pre-line break-words"
+               data-testid={`spec-cell-value-${specItem.id}-${company.id}`}>
+            {value.value}
+          </div>
+        ) : (
+          <div className="text-sm text-ink-soft/60">—</div>
+        )}
+        <div className="flex items-center justify-end gap-1 no-print">
+          {note && (
+            <span className="text-[10px] font-mono text-wood-deep" title="メモあり" aria-label="メモあり">📝</span>
+          )}
+          <button type="button"
+            data-testid={`spec-cell-note-button-${specItem.id}-${company.id}`}
+            onClick={onNote}
+            className="text-[11px] px-2 py-0.5 rounded-full border border-rule text-ink-soft hover:text-ink"
+            aria-label={`${company.name}の${specItem.name}の評価メモ`}>
+            📝
+          </button>
+          <button type="button"
+            data-testid={`spec-cell-edit-button-${specItem.id}-${company.id}`}
+            onClick={onEdit}
+            className="text-[11px] px-2 py-0.5 rounded-full border border-rule text-ink-soft hover:text-ink"
+            aria-label={`${company.name}の${specItem.name}を編集`}>
+            {hasValue ? "編集" : "+ 入力"}
+          </button>
+        </div>
+      </div>
+    </td>
+  );
+}
+
+// ---- 仕様行 ----
+
+function SpecRow({ specItem, companies, notesByCompany, onCellEdit, onNoteEdit, onItemEdit, onItemDelete, onMoveUp, onMoveDown, saveDisabled, isFirst, isLast }) {
+  return (
+    <tr data-testid={`spec-row-${specItem.id}`}>
+      <th className="border border-rule bg-paper text-left align-top p-2 min-w-[180px] sticky left-0" scope="row">
+        <div className="flex items-start gap-1">
+          <div className="flex-1 min-w-0">
+            <div className="text-sm text-ink truncate" data-testid={`spec-item-name-${specItem.id}`}>{specItem.name}</div>
+          </div>
+          <div className="flex flex-col gap-0.5 no-print">
+            <button type="button" data-testid={`spec-item-move-up-${specItem.id}`}
+              onClick={onMoveUp} disabled={isFirst || saveDisabled}
+              aria-label="上に移動"
+              className="text-[10px] w-5 h-5 flex items-center justify-center rounded border border-rule text-ink-soft hover:text-ink disabled:opacity-30 disabled:cursor-not-allowed">
+              ▲
+            </button>
+            <button type="button" data-testid={`spec-item-move-down-${specItem.id}`}
+              onClick={onMoveDown} disabled={isLast || saveDisabled}
+              aria-label="下に移動"
+              className="text-[10px] w-5 h-5 flex items-center justify-center rounded border border-rule text-ink-soft hover:text-ink disabled:opacity-30 disabled:cursor-not-allowed">
+              ▼
+            </button>
+          </div>
+        </div>
+        <div className="flex gap-1 mt-1 no-print">
+          <button type="button" data-testid={`spec-item-edit-${specItem.id}`}
+            onClick={onItemEdit} disabled={saveDisabled}
+            className="text-[10px] px-2 py-0.5 rounded-full border border-rule text-ink-soft hover:text-ink disabled:opacity-30">
+            編集
+          </button>
+          <button type="button" data-testid={`spec-item-delete-${specItem.id}`}
+            onClick={onItemDelete} disabled={saveDisabled}
+            className="text-[10px] px-2 py-0.5 rounded-full border border-rule text-rust hover:bg-rust hover:text-white disabled:opacity-30">
+            削除
+          </button>
+        </div>
+      </th>
+      {companies.map((co) => {
+        const v = (specItem.values || []).find((sv) => sv.companyId === co.id);
+        const note = notesByCompany[co.id];
+        return (
+          <SpecCell
+            key={co.id}
+            specItem={specItem}
+            company={co}
+            value={v}
+            note={note}
+            onEdit={() => onCellEdit(co)}
+            onNote={() => onNoteEdit(co)}
+          />
+        );
+      })}
+    </tr>
+  );
+}
+
+// ---- 仕様比較ビュー (メイン) ----
+
+export function SpecComparisonView({ saveDisabled }) {
+  const showToast = useToast();
+  const showConfirm = useConfirm();
+
+  const [companies, setCompanies] = useState(null);
+  const [categories, setCategories] = useState(null);
+  const [specItems, setSpecItems] = useState(null);
+  const [notes, setNotes] = useState([]);
+
+  const [showCategoryManager, setShowCategoryManager] = useState(false);
+  const [showItemAdd, setShowItemAdd] = useState(false);
+  const [editingItem, setEditingItem] = useState(null); // SpecItem editing
+  const [editingCell, setEditingCell] = useState(null); // { specItem, company }
+  const [editingNote, setEditingNote] = useState(null); // { specItem, company }
+  const [hiddenCompanies, setHiddenCompanies] = useState(() => new Set());
+  const [showOnlyEmpty, setShowOnlyEmpty] = useState(false);
+  const [foldedCategories, setFoldedCategories] = useState(() => new Set());
+
+  const reload = useCallback(async () => {
+    const cos = (await loadCompaniesFromStorage()).filter((c) => !c.deletedAt);
+    const cats = await loadCategoriesFromStorage();
+    const items = await loadSpecItemsFromStorage();
+    const ns = await loadSpecItemNotesFromStorage();
+    setCompanies(cos);
+    setCategories(cats);
+    setSpecItems(items);
+    setNotes(ns);
+  }, []);
+
+  useEffect(() => { reload(); }, [reload]);
+
+  if (!companies || !categories || !specItems) return <Spinner label="仕様データを読み込み中..." />;
+
+  // ---- 会社0件 → Empty State (E1) ----
+  if (companies.length === 0) {
+    return (
+      <EmptyState
+        icon="🏢"
+        title="比較する会社を先に登録してください"
+        description="会社管理タブから1社以上を登録すると仕様比較ができます。"
+        testId="spec-empty-state-no-companies"
+      />
+    );
+  }
+
+  const visibleCompanies = companies.filter((c) => !hiddenCompanies.has(c.id));
+  const activeCategories = categories
+    .filter((c) => !c.deletedAt)
+    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+  const activeItems = specItems.filter((i) => !i.deletedAt);
+
+  // ---- 項目0件 → Empty State (E10 相当) ----
+  if (activeCategories.length === 0 && activeItems.length === 0) {
+    return (
+      <EmptyState
+        icon="📋"
+        title="仕様項目がありません"
+        description="標準テンプレートが投入されていない可能性があります。仕様項目を追加するか、設定画面でテンプレートを再投入してください。"
+        action={{
+          label: "+ 仕様項目を追加",
+          onClick: () => setShowItemAdd(true),
+          testId: "spec-empty-add-item-button",
+        }}
+        testId="spec-empty-state-no-items"
+      />
+    );
+  }
+
+  const toggleCompany = (id) => {
+    setHiddenCompanies((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleCategoryFold = (id) => {
+    setFoldedCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const isRowAllEmpty = (item) => {
+    return visibleCompanies.every((co) => {
+      const v = (item.values || []).find((sv) => sv.companyId === co.id);
+      return !v || !v.value || String(v.value).length === 0;
+    });
+  };
+
+  // ---- カテゴリ管理 ----
+  const handleSaveCategory = async ({ id, name }) => {
+    try {
+      let next;
+      if (id) {
+        next = categories.map((c) =>
+          c.id === id ? { ...c, name: name.trim(), normalizedName: normalizeCategoryNameInline(name) } : c
+        );
+      } else {
+        const sortOrder = Math.max(0, ...categories.map((c) => c.sortOrder ?? 0)) + 1;
+        next = [...categories, {
+          id: newId(),
+          createdAt: new Date().toISOString(),
+          name: name.trim(),
+          normalizedName: normalizeCategoryNameInline(name),
+          sortOrder,
+          isDefault: false,
+        }];
+      }
+      await saveWithCapacityCheck(STORAGE_KEYS.CATEGORIES, next, showToast);
+      setCategories(next);
+      showToast("success", id ? "カテゴリを更新しました" : "カテゴリを追加しました");
+    } catch (e) { console.error(e); }
+  };
+
+  const handleDeleteCategory = async (id) => {
+    try {
+      const next = categories.map((c) =>
+        c.id === id ? { ...c, deletedAt: new Date().toISOString() } : c
+      );
+      await saveWithCapacityCheck(STORAGE_KEYS.CATEGORIES, next, showToast);
+      setCategories(next);
+      showToast("success", "カテゴリを削除しました");
+    } catch (e) { console.error(e); }
+  };
+
+  // ---- 仕様項目追加 ----
+  const handleAddItem = async ({ name, categoryId, newCategoryName }) => {
+    try {
+      let cats = categories;
+      let useCategoryId = categoryId;
+      if (newCategoryName) {
+        const sortOrder = Math.max(0, ...cats.map((c) => c.sortOrder ?? 0)) + 1;
+        const newCat = {
+          id: newId(),
+          createdAt: new Date().toISOString(),
+          name: newCategoryName.trim(),
+          normalizedName: normalizeCategoryNameInline(newCategoryName),
+          sortOrder,
+          isDefault: false,
+        };
+        cats = [...cats, newCat];
+        useCategoryId = newCat.id;
+        await saveWithCapacityCheck(STORAGE_KEYS.CATEGORIES, cats, showToast);
+        setCategories(cats);
+      }
+      const sortOrder = nextSortOrderForCategoryInline(specItems, useCategoryId);
+      const newItem = {
+        id: newId(),
+        createdAt: new Date().toISOString(),
+        categoryId: useCategoryId,
+        name: name.trim(),
+        sortOrder,
+        values: [],
+      };
+      const nextItems = [...specItems, newItem];
+      await saveWithCapacityCheck(STORAGE_KEYS.SPEC_ITEMS, nextItems, showToast);
+      setSpecItems(nextItems);
+      setShowItemAdd(false);
+      showToast("success", "仕様項目を追加しました");
+    } catch (e) { console.error(e); }
+  };
+
+  // ---- 仕様項目 編集 / 削除 / 並び替え ----
+  const handleEditItem = async (updated) => {
+    try {
+      const next = specItems.map((i) => (i.id === updated.id ? updated : i));
+      await saveWithCapacityCheck(STORAGE_KEYS.SPEC_ITEMS, next, showToast);
+      setSpecItems(next);
+      setEditingItem(null);
+      showToast("success", "仕様項目を更新しました");
+    } catch (e) { console.error(e); }
+  };
+
+  const handleDeleteItem = async (item) => {
+    const ok = await showConfirm(
+      `仕様項目「${item.name}」を削除しますか？`,
+      "論理削除されます。記録された ChangeLog は保持されます。"
+    );
+    if (!ok) return;
+    try {
+      const next = specItems.map((i) =>
+        i.id === item.id ? { ...i, deletedAt: new Date().toISOString() } : i
+      );
+      await saveWithCapacityCheck(STORAGE_KEYS.SPEC_ITEMS, next, showToast);
+      setSpecItems(next);
+      showToast("success", "仕様項目を削除しました");
+    } catch (e) { console.error(e); }
+  };
+
+  const handleMove = async (item, direction) => {
+    const next = moveSpecItemInline(specItems, item.id, direction);
+    if (next === specItems) return; // 変化なし
+    try {
+      await saveWithCapacityCheck(STORAGE_KEYS.SPEC_ITEMS, next, showToast);
+      setSpecItems(next);
+    } catch (e) { console.error(e); }
+  };
+
+  // ---- セル編集 (値変更 + ChangeLog 記録) ----
+  const handleCellSubmit = async ({ value, reason, meetingId }) => {
+    const { specItem, company } = editingCell;
+    const existing = (specItem.values || []).find((v) => v.companyId === company.id);
+    const previousValue = existing?.value ?? "";
+    if (previousValue === value) {
+      setEditingCell(null);
+      return;
+    }
+    try {
+      // SpecItem 更新
+      const now = new Date().toISOString();
+      const newValue = { companyId: company.id, value: String(value), meetingId, updatedAt: now };
+      const updatedItem = {
+        ...specItem,
+        values: [...(specItem.values || []).filter((v) => v.companyId !== company.id), newValue],
+      };
+      const nextItems = specItems.map((i) => (i.id === specItem.id ? updatedItem : i));
+      await saveWithCapacityCheck(STORAGE_KEYS.SPEC_ITEMS, nextItems, showToast);
+      setSpecItems(nextItems);
+
+      // ChangeLog 追記
+      const log = buildChangeLogInline({
+        specItemId: specItem.id, companyId: company.id,
+        previousValue, newValue: value,
+        meetingId, reason,
+      });
+      const logs = await loadChangeLogsFromStorage();
+      await saveWithCapacityCheck(STORAGE_KEYS.CHANGE_LOGS, [...logs, log], showToast);
+
+      setEditingCell(null);
+      showToast("success", "仕様値を更新しました");
+    } catch (e) { console.error(e); }
+  };
+
+  // ---- メモ保存 / 削除 ----
+  const handleNoteSubmit = async ({ note }) => {
+    const { specItem, company } = editingNote;
+    try {
+      const list = await loadSpecItemNotesFromStorage();
+      const existing = findNoteInline(list, specItem.id, company.id);
+      let next;
+      if (existing) {
+        next = list.map((n) =>
+          n.id === existing.id ? { ...n, note: note.trim(), updatedAt: new Date().toISOString() } : n
+        );
+      } else {
+        next = [...list, {
+          id: newId(),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          specItemId: specItem.id,
+          companyId: company.id,
+          note: note.trim(),
+        }];
+      }
+      await saveWithCapacityCheck(STORAGE_KEYS.SPEC_ITEM_NOTES, next, showToast);
+      setNotes(next);
+      setEditingNote(null);
+      showToast("success", "メモを保存しました");
+    } catch (e) { console.error(e); }
+  };
+
+  const handleNoteDelete = async () => {
+    const { specItem, company } = editingNote;
+    try {
+      const list = await loadSpecItemNotesFromStorage();
+      const existing = findNoteInline(list, specItem.id, company.id);
+      if (!existing) { setEditingNote(null); return; }
+      const next = list.filter((n) => n.id !== existing.id);
+      await saveWithCapacityCheck(STORAGE_KEYS.SPEC_ITEM_NOTES, next, showToast);
+      setNotes(next);
+      setEditingNote(null);
+      showToast("success", "メモを削除しました");
+    } catch (e) { console.error(e); }
+  };
+
+  return (
+    <div data-testid="spec-comparison-view">
+      <div className="flex items-baseline justify-between mb-5 gap-3 flex-wrap">
+        <div>
+          <h2 className="text-xl text-ink" style={{ fontFamily: "var(--jp-serif)", fontWeight: 600 }}>
+            仕様比較
+          </h2>
+          <p className="font-serif-en text-[11px] uppercase tracking-widest text-wood-deep mt-1">
+            Spec Comparison
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <button type="button" onClick={() => setShowCategoryManager(true)} data-testid="manage-categories-button"
+            className="px-4 py-2 rounded-full border border-rule text-sm text-ink-soft hover:text-ink hover:border-wood-deep">
+            カテゴリ管理
+          </button>
+          <button type="button" onClick={() => setShowItemAdd(true)} data-testid="add-spec-item-button" disabled={saveDisabled}
+            className="px-5 py-2 rounded-full bg-rust text-white text-sm hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed">
+            + 仕様項目を追加
+          </button>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-3 items-center mb-5 no-print">
+        <label className="flex items-center gap-1.5 text-xs text-ink-soft cursor-pointer">
+          <input type="checkbox"
+            checked={showOnlyEmpty}
+            onChange={(e) => setShowOnlyEmpty(e.target.checked)}
+            data-testid="filter-empty-only"
+            className="rounded border-rule" />
+          未入力のみ表示
+        </label>
+        <div className="flex flex-wrap gap-1.5">
+          <span className="text-[11px] text-ink-soft uppercase tracking-widest font-serif-en">Columns:</span>
+          {companies.map((co) => {
+            const hidden = hiddenCompanies.has(co.id);
+            return (
+              <button key={co.id} type="button"
+                data-testid={`column-toggle-${co.id}`}
+                onClick={() => toggleCompany(co.id)}
+                aria-pressed={!hidden}
+                className={"px-3 py-0.5 rounded-full text-[11px] border " +
+                  (hidden
+                    ? "bg-bg text-ink-soft/50 border-rule line-through"
+                    : "bg-paper text-ink border-rule hover:border-wood-deep")}
+                style={{ letterSpacing: "0.08em" }}>
+                {co.name}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {visibleCompanies.length === 0 ? (
+        <EmptyState
+          icon="👁"
+          title="表示する会社がありません"
+          description="上の列トグルから少なくとも1社を表示してください。"
+          testId="spec-no-visible-companies"
+        />
+      ) : (
+        <div className="overflow-x-auto border border-rule rounded-2xl bg-paper">
+          <table className="w-full text-sm" data-testid="spec-table">
+            <thead>
+              <tr className="bg-paper sticky top-0">
+                <th className="border border-rule p-3 text-left sticky left-0 bg-paper min-w-[180px]" style={{ fontFamily: "var(--jp-serif)", fontWeight: 600 }}>
+                  項目
+                </th>
+                {visibleCompanies.map((co) => (
+                  <th key={co.id} className="border border-rule p-3 text-left min-w-[180px]" style={{ fontFamily: "var(--jp-serif)", fontWeight: 600 }}>
+                    {co.name}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {activeCategories.map((cat) => {
+                const items = specItemsByCategoryInline(activeItems, cat.id);
+                const folded = foldedCategories.has(cat.id);
+                const filtered = showOnlyEmpty ? items.filter((i) => isRowAllEmpty(i)) : items;
+                return (
+                  <React.Fragment key={cat.id}>
+                    <tr className="bg-bg/50" data-testid={`category-section-${cat.id}`}>
+                      <th colSpan={visibleCompanies.length + 1}
+                        className="border border-rule p-2 text-left bg-bg sticky left-0"
+                        scope="colgroup">
+                        <div className="flex items-center justify-between gap-2">
+                          <button type="button"
+                            data-testid={`category-toggle-${cat.id}`}
+                            onClick={() => toggleCategoryFold(cat.id)}
+                            className="flex items-center gap-2 text-sm text-ink hover:text-rust transition focus-visible:outline focus-visible:outline-2 ring-rust rounded">
+                            <span aria-hidden="true">{folded ? "▶" : "▼"}</span>
+                            <span style={{ fontFamily: "var(--jp-serif)", fontWeight: 600 }}>{cat.name}</span>
+                            <span className="text-xs text-ink-soft">({items.length})</span>
+                          </button>
+                        </div>
+                      </th>
+                    </tr>
+                    {!folded && filtered.map((item, idx) => (
+                      <SpecRow key={item.id}
+                        specItem={item}
+                        companies={visibleCompanies}
+                        notesByCompany={visibleCompanies.reduce((acc, co) => {
+                          acc[co.id] = findNoteInline(notes, item.id, co.id); return acc;
+                        }, {})}
+                        onCellEdit={(co) => setEditingCell({ specItem: item, company: co })}
+                        onNoteEdit={(co) => setEditingNote({ specItem: item, company: co })}
+                        onItemEdit={() => setEditingItem(item)}
+                        onItemDelete={() => handleDeleteItem(item)}
+                        onMoveUp={() => handleMove(item, "up")}
+                        onMoveDown={() => handleMove(item, "down")}
+                        saveDisabled={saveDisabled}
+                        isFirst={idx === 0}
+                        isLast={idx === filtered.length - 1}
+                      />
+                    ))}
+                  </React.Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {showCategoryManager && (
+        <CategoryManager
+          categories={categories}
+          onClose={() => setShowCategoryManager(false)}
+          onSave={handleSaveCategory}
+          onDelete={handleDeleteCategory}
+          saveDisabled={saveDisabled}
+        />
+      )}
+      {showItemAdd && (
+        <ItemAddModal
+          categories={categories}
+          onSubmit={handleAddItem}
+          onClose={() => setShowItemAdd(false)}
+          saveDisabled={saveDisabled}
+        />
+      )}
+      {editingItem && (
+        <SpecItemEditModal
+          specItem={editingItem}
+          onSubmit={handleEditItem}
+          onClose={() => setEditingItem(null)}
+          saveDisabled={saveDisabled}
+        />
+      )}
+      {editingCell && (
+        <SpecCellEditor
+          specItem={editingCell.specItem}
+          company={editingCell.company}
+          currentValue={(editingCell.specItem.values || []).find((v) => v.companyId === editingCell.company.id)}
+          onSubmit={handleCellSubmit}
+          onClose={() => setEditingCell(null)}
+          saveDisabled={saveDisabled}
+        />
+      )}
+      {editingNote && (
+        <SpecItemNotePopover
+          specItem={editingNote.specItem}
+          company={editingNote.company}
+          existingNote={findNoteInline(notes, editingNote.specItem.id, editingNote.company.id)}
+          onSubmit={handleNoteSubmit}
+          onDelete={handleNoteDelete}
+          onClose={() => setEditingNote(null)}
+          saveDisabled={saveDisabled}
+        />
+      )}
+    </div>
+  );
+}
 
 // ===== 6. 打ち合わせコンポーネント =====
 // Sprint 3 で実装
@@ -1631,9 +2692,11 @@ function AppInner() {
       <TabNavigation currentTab={currentTab} onTabChange={setCurrentTab} />
 
       <main className="max-w-7xl mx-auto px-4 py-6" data-testid="main-content">
-        {currentTab === "companies"
-          ? <CompaniesView saveDisabled={saveDisabled} />
-          : <TabPlaceholder tabId={currentTab} />}
+        {currentTab === "companies" && <CompaniesView saveDisabled={saveDisabled} />}
+        {currentTab === "spec-comparison" && <SpecComparisonView saveDisabled={saveDisabled} />}
+        {currentTab !== "companies" && currentTab !== "spec-comparison" && (
+          <TabPlaceholder tabId={currentTab} />
+        )}
 
         {/* 開発用デバッグパネル（Sprint 0 のみ） */}
         <DevDebugPanel
