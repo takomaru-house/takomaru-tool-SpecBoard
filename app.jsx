@@ -395,7 +395,7 @@ async function initializeDefaultTemplateIfEmpty() {
 
 const ToastContext = createContext(null);
 
-function ToastProvider({ children }) {
+export function ToastProvider({ children }) {
   const [toasts, setToasts] = useState([]);
   const idRef = useRef(0);
 
@@ -473,7 +473,7 @@ function ToastContainer({ toasts, onDismiss }) {
 
 const ConfirmContext = createContext(null);
 
-function ConfirmProvider({ children }) {
+export function ConfirmProvider({ children }) {
   const [state, setState] = useState(null); // { title, description, resolve }
 
   const showConfirm = useCallback((title, description) => {
@@ -748,7 +748,7 @@ function updateCompanyEntity(original, input) {
 
 // ---- ステータスバッジ ----
 
-function StatusBadge({ status, testId }) {
+export function StatusBadge({ status, testId }) {
   const style = COMPANY_STATUS_BADGE[status] || COMPANY_STATUS_BADGE.considering;
   return (
     <span
@@ -804,7 +804,7 @@ function Field({ label, htmlFor, error, hint, max, value, children }) {
 
 // ---- 会社追加・編集モーダル ----
 
-function CompanyFormModal({ existingCompanies, initial, onSubmit, onClose, saveDisabled }) {
+export function CompanyFormModal({ existingCompanies, initial, onSubmit, onClose, saveDisabled }) {
   const isEdit = Boolean(initial?.id);
   const [form, setForm] = useState({
     name: initial?.name ?? "",
@@ -819,6 +819,13 @@ function CompanyFormModal({ existingCompanies, initial, onSubmit, onClose, saveD
   const [errors, setErrors] = useState({});
   const [submitted, setSubmitted] = useState(false);
   const titleId = useMemo(() => `company-form-title-${Math.random().toString(36).slice(2, 8)}`, []);
+
+  // ESC キーでモーダルを閉じる (document レベルでリッスンしてフォーカス位置に依存しない)
+  useEffect(() => {
+    const handler = (e) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [onClose]);
 
   const update = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
 
@@ -846,6 +853,7 @@ function CompanyFormModal({ existingCompanies, initial, onSubmit, onClose, saveD
     >
       <form
         onSubmit={handleSubmit}
+        noValidate
         className="bg-bg rounded-2xl max-w-xl w-full p-7 my-8"
         style={{ boxShadow: "0 16px 48px rgba(26,24,22,0.22)", border: "1px solid var(--rule)" }}
       >
@@ -940,7 +948,7 @@ function CompanyFormModal({ existingCompanies, initial, onSubmit, onClose, saveD
 
 // ---- 会社カード ----
 
-function CompanyCard({ company, meetingsCount, onEdit, onDelete, onClick }) {
+export function CompanyCard({ company, meetingsCount, onEdit, onDelete, onClick }) {
   return (
     <article
       data-testid="company-card"
@@ -1012,7 +1020,7 @@ function CompanyCard({ company, meetingsCount, onEdit, onDelete, onClick }) {
 
 // ---- 会社詳細ページ ----
 
-function CompanyDetailPage({ company, onClose, onEdit }) {
+export function CompanyDetailPage({ company, onClose, onEdit }) {
   const [tab, setTab] = useState("info"); // info | meetings | specs
   if (!company) return null;
 
@@ -1127,7 +1135,7 @@ const STATUS_FILTERS = [
   { id: "rejected",     label: "落選" },
 ];
 
-function CompaniesView({ saveDisabled }) {
+export function CompaniesView({ saveDisabled }) {
   const showToast = useToast();
   const showConfirm = useConfirm();
 

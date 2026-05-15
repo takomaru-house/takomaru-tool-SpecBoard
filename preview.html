@@ -169,8 +169,12 @@
           if (!r.ok) throw new Error(`fetch失敗: ${r.status}`);
           return r.text();
         });
+        // app.jsx の export を Function スコープで動作するように除去
+        //   - `export default App;` → `window.App = App;` (グローバル代入)
+        //   - `export function Foo` / `export const Foo` 等 → `export` を除去して通常宣言に
         const transformed = src
-          .replace(/^\s*export\s+default\s+App\s*;?\s*$/m, "window.App = App;");
+          .replace(/^\s*export\s+default\s+App\s*;?\s*$/m, "window.App = App;")
+          .replace(/^\s*export\s+(function|const|let|var|class)\s+/gm, "$1 ");
         const code = Babel.transform(transformed, { presets: ["env", "react"] }).code;
         // eslint-disable-next-line no-new-func
         new Function(code)();

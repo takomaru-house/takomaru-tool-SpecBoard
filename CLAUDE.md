@@ -116,6 +116,27 @@ CLAUDE.md（12ルール版）
     1コミット相当のスコープで揃えて修正する。
     一方のみを更新して整合を崩した状態で放置することを禁止する。
 
+11. **テストゲート: 全自動テストが PASS していない状態で次 Sprint に進まない**
+    各 Sprint の完了条件は以下を **すべて** 満たすこと:
+    - 単体テスト (`npm run test:unit`) 全件 PASS
+    - 結合テスト (`npm run test:integration`) 全件 PASS
+    - コンポーネントテスト (`npm run test:component`) 全件 PASS — UI挙動を含む
+    - `node -e "require('@babel/parser').parse(require('fs').readFileSync('app.jsx','utf-8'),{sourceType:'module',plugins:['jsx']})"` で構文クリーン
+    - 該当 Sprint の動作確認チェックリストを満たす
+
+    **「手動で確認してください」と提案する前に、自動化可能か必ず検討する。**
+    自動化できる項目を手動依頼することは原則禁止。本当に手動が必要な項目は
+    「テスト設計 / 手動テスト対象（自動化困難なもの）」表に該当するもの (印刷レイアウト・
+    スクリーンリーダー・実機・探索的テスト等) のみとする。
+
+12. **各 Sprint で必須のテストレベル**
+    | レベル | 対象 | ツール |
+    |--------|------|--------|
+    | 単体 (UT) | 純粋関数 (バリデーション・エンティティ操作・ユーティリティ) | Vitest |
+    | 結合 (IT) | ストレージ操作・複数モジュール連携 | Vitest |
+    | コンポーネント | UI挙動 (フォーム送信・条件レンダリング・ユーザー操作・Toast/Dialog) | Vitest + React Testing Library + user-event |
+    | E2E (任意) | エンドツーエンドの主要フロー | Playwright (Sprint 7-B で導入) |
+
 ---
 
 ## 必読ドキュメント体系

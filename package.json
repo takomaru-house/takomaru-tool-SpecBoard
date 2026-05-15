@@ -8,14 +8,22 @@
     "test": "vitest run",
     "test:unit": "vitest run __tests__/unit",
     "test:integration": "vitest run __tests__/integration",
+    "test:component": "vitest run __tests__/component",
     "test:watch": "vitest --watch",
     "test:coverage": "vitest run --coverage",
     "test:sprint0": "vitest run __tests__/unit/storage.test.js __tests__/unit/migration.test.js",
+    "test:sprint1": "vitest run __tests__/unit/validation.test.js __tests__/integration/company.test.js __tests__/component",
     "preview": "npx serve ."
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@vitejs/plugin-react": "^6.0.2",
     "@vitest/coverage-v8": "^1.6.0",
     "jsdom": "^24.1.0",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
     "vitest": "^1.6.0"
   }
 }
