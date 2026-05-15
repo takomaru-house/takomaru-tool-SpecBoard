@@ -21,7 +21,10 @@ jobs:
           node-version: '20'
           cache: 'npm'
       - name: 依存関係インストール
-        run: npm ci
+        # @vitejs/plugin-react と @vitest/coverage-v8 が異なる esbuild バージョンを
+        # 要求するため npm ci の厳格チェックを通せない (npm の resolver 制約)。
+        # --no-save で lock を更新せずに install する。
+        run: npm install --no-audit --no-fund --no-save
       - name: app.jsx 構文チェック
         run: |
           node -e "const fs=require('fs');const p=require('@babel/parser');p.parse(fs.readFileSync('app.jsx','utf-8'),{sourceType:'module',plugins:['jsx']});console.log('OK app.jsx parses');"
