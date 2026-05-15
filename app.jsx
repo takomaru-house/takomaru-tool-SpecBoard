@@ -1832,16 +1832,39 @@ export function SpecItemNotePopover({ specItem, company, existingNote, onSubmit,
 
 // ---- 仕様セル (テーブルの1セル) ----
 
+// E5: 長い仕様値は max-height で省略表示し、「全文を見る」で展開する
+const SPEC_VALUE_TRUNCATE_THRESHOLD = 80;
+
 function SpecCell({ specItem, company, value, note, onEdit, onNote }) {
-  const hasValue = value && String(value.value ?? "").length > 0;
+  const [expanded, setExpanded] = useState(false);
+  const rawValue = value?.value ?? "";
+  const hasValue = String(rawValue).length > 0;
+  const isLong = String(rawValue).length > SPEC_VALUE_TRUNCATE_THRESHOLD;
+
   return (
     <td className="border border-rule align-top p-2 min-w-[180px]" data-testid={`spec-cell-${specItem.id}-${company.id}`}>
       <div className="flex flex-col gap-1">
         {hasValue ? (
-          <div className="text-sm text-ink leading-relaxed whitespace-pre-line break-words"
-               data-testid={`spec-cell-value-${specItem.id}-${company.id}`}>
-            {value.value}
-          </div>
+          <>
+            <div
+              className="text-sm text-ink leading-relaxed whitespace-pre-line break-words overflow-hidden"
+              data-testid={`spec-cell-value-${specItem.id}-${company.id}`}
+              style={isLong && !expanded ? { maxHeight: "5.6em" } : undefined}
+            >
+              {rawValue}
+            </div>
+            {isLong && (
+              <button
+                type="button"
+                onClick={() => setExpanded((v) => !v)}
+                data-testid={`spec-cell-expand-${specItem.id}-${company.id}`}
+                className="self-start text-[11px] text-rust hover:underline no-print"
+                aria-expanded={expanded}
+              >
+                {expanded ? "▲ 折りたたむ" : "▼ 全文を見る"}
+              </button>
+            )}
+          </>
         ) : (
           <div className="text-sm text-ink-soft/60">—</div>
         )}
