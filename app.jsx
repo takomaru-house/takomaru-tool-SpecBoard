@@ -2925,17 +2925,33 @@ function MeetingCard({ meeting, company, onClick, onEdit, onDelete, decisionsCou
 
 // ---- 打ち合わせ詳細ページ ----
 
-function DecisionDetailRow({ decision, specItem, company, onChangeStatus, onDelete }) {
+function DecisionDetailRow({ decision, specItem, company, onChangeStatus, onDelete, onReflect, saveDisabled }) {
+  // Spec セクション表示条件: specItemId か specValue のいずれかが設定されているとき
+  const hasSpecRef = Boolean(decision.specItemId) || Boolean(decision.specValue);
+  // 仕様項目削除済み判定 (specItemId はあるが specItem が見つからない or deletedAt 持ち)
+  const specItemDeleted = Boolean(decision.specItemId) && (!specItem || specItem.deletedAt);
+  // 反映可能: specItemId / specCompanyId / specValue が揃っており、対象 SpecItem が削除されていない
+  const reflectable = Boolean(
+    decision.specItemId && decision.specCompanyId && decision.specValue && specItem && !specItem.deletedAt
+  );
+
   return (
     <div className="border border-rule rounded-xl p-4 bg-paper/40" data-testid={`decision-detail-${decision.id}`}>
       <div className="flex items-start justify-between gap-3 mb-2">
         <p className="text-sm text-ink leading-relaxed whitespace-pre-line flex-1">{decision.content}</p>
         <DecisionStatusBadge status={decision.status} testId={`decision-detail-status-${decision.id}`} />
       </div>
-      {(specItem || decision.specValue) && (
-        <div className="mt-2 text-xs text-ink-soft pt-2 border-t border-rule/60">
+      {hasSpecRef && (
+        <div className="mt-2 text-xs text-ink-soft pt-2 border-t border-rule/60"
+             data-testid={`decision-spec-ref-${decision.id}`}>
           <span className="font-serif-en uppercase text-[10px] tracking-widest text-wood-deep mr-2">Spec</span>
-          {specItem ? specItem.name : "[削除済み仕様項目]"}
+          {specItemDeleted ? (
+            <span className="text-ink-soft italic" data-testid={`decision-deleted-spec-item-${decision.id}`}>
+              [削除済み仕様項目]
+            </span>
+          ) : (
+            <span>{specItem ? specItem.name : "—"}</span>
+          )}
           {company && <> <span className="mx-1 opacity-50">·</span> {company.name}</>}
           {decision.specValue && <> <span className="mx-1 opacity-50">→</span> <span className="text-ink">{decision.specValue}</span></>}
         </div>
@@ -2943,7 +2959,15 @@ function DecisionDetailRow({ decision, specItem, company, onChangeStatus, onDele
       {decision.note && (
         <p className="mt-2 text-xs text-ink-soft border-l-2 border-rule pl-2">{decision.note}</p>
       )}
-      <div className="mt-3 flex justify-end gap-2 no-print">
+      <div className="mt-3 flex justify-end gap-2 no-print flex-wrap">
+        {reflectable && (
+          <button type="button" onClick={() => onReflect?.(decision)}
+            data-testid={`decision-reflect-${decision.id}`}
+            disabled={saveDisabled}
+            className="text-xs px-3 py-1 rounded-full bg-rust text-white hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed">
+            ✅ 仕様に反映
+          </button>
+        )}
         <select value={decision.status}
           onChange={(e) => onChangeStatus(decision, e.target.value)}
           data-testid={`decision-status-change-${decision.id}`}
@@ -2962,7 +2986,7 @@ function DecisionDetailRow({ decision, specItem, company, onChangeStatus, onDele
   );
 }
 
-export function MeetingDetailPage({ meeting, company, decisions, specItems, companies, onClose, onEdit, onChangeStatus, onDeleteDecision }) {
+export function MeetingDetailPage({ meeting, company, decisions, specItems, companies, onClose, onEdit, onChangeStatus, onDeleteDecision, onReflect, saveDisabled }) {
   if (!meeting) return null;
   return (
     <div
@@ -3031,7 +3055,9 @@ export function MeetingDetailPage({ meeting, company, decisions, specItems, comp
                 return <DecisionDetailRow key={d.id} decision={d}
                   specItem={item} company={co}
                   onChangeStatus={onChangeStatus}
-                  onDelete={onDeleteDecision} />;
+                  onDelete={onDeleteDecision}
+                  onReflect={onReflect}
+                  saveDisabled={saveDisabled} />;
               })}
             </div>
           )}
@@ -3060,6 +3086,7 @@ export function MeetingsView({ saveDisabled }) {
   const [detailMeeting, setDetailMeeting] = useState(null);
   const [companyFilter, setCompanyFilter] = useState("all");
   const [page, setPage] = useState(1);
+  const [reflectingDecision, setReflectingDecision] = useState(null);
 
   const reload = useCallback(async () => {
     setCompanies((await loadCompaniesFromStorage()).filter((c) => !c.deletedAt));
@@ -3270,6 +3297,31 @@ export function MeetingsView({ saveDisabled }) {
     } catch (e) { console.error(e); }
   };
 
+  const handleOpenReflect = (decision) => {
+    setReflectingDecision(decision);
+  };
+
+  const handleConfirmReflect = async ({ reason }) => {
+    if (!reflectingDecision) return;
+    try {
+      await reflectToSpecInline(reflectingDecision, reason, showToast);
+      await reload();
+      // 決定事項を「確定」に自動更新する仕様 (反映済みの記録)
+      const next = decisions.map((d) =>
+        d.id === reflectingDecision.id ? { ...d, status: "confirmed" } : d
+      );
+      try {
+        await saveWithCapacityCheck(STORAGE_KEYS.DECISIONS, next, showToast);
+        setDecisions(next);
+      } catch { /* status 更新の失敗は致命的ではないので無視 */ }
+      setReflectingDecision(null);
+      showToast("success", "仕様を更新しました");
+    } catch (e) {
+      console.error(e);
+      // Toast は reflectToSpecInline 側で表示済み
+    }
+  };
+
   return (
     <div data-testid="meetings-view">
       <div className="flex items-baseline justify-between mb-5 gap-3 flex-wrap">
@@ -3382,6 +3434,19 @@ export function MeetingsView({ saveDisabled }) {
           onEdit={() => { const m = detailMeeting; setDetailMeeting(null); handleEdit(m); }}
           onChangeStatus={handleChangeDecisionStatus}
           onDeleteDecision={handleDeleteDecision}
+          onReflect={handleOpenReflect}
+          saveDisabled={saveDisabled}
+        />
+      )}
+
+      {reflectingDecision && (
+        <SpecReflectionDialog
+          decision={reflectingDecision}
+          specItem={specItems.find((s) => s.id === reflectingDecision.specItemId)}
+          company={companies.find((c) => c.id === reflectingDecision.specCompanyId)}
+          onConfirm={handleConfirmReflect}
+          onClose={() => setReflectingDecision(null)}
+          saveDisabled={saveDisabled}
         />
       )}
     </div>
@@ -3389,7 +3454,370 @@ export function MeetingsView({ saveDisabled }) {
 }
 
 // ===== 7. 変更ログコンポーネント =====
-// Sprint 4 で実装
+
+// ---- Sprint 4 内部ユーティリティ ----
+
+function deepCloneInline(value) {
+  return value == null ? value : JSON.parse(JSON.stringify(value));
+}
+
+/**
+ * アトミックな仕様反映処理 (src/utils/specReflection.js のミラー)
+ * SpecItem 保存 → ChangeLog 保存 を順序実行し、失敗時はロールバックする。
+ */
+async function reflectToSpecInline(decision, reason, showToast) {
+  if (!decision?.specItemId || !decision?.specCompanyId) {
+    throw new Error("specItemId / specCompanyId が必要です");
+  }
+  const specItemsBefore = await loadSpecItemsFromStorage();
+  const changeLogsBefore = await loadChangeLogsFromStorage();
+  const item = specItemsBefore.find((i) => i.id === decision.specItemId);
+  if (!item) throw new Error("対象の仕様項目が見つかりません");
+
+  const previous = (item.values || []).find((v) => v.companyId === decision.specCompanyId);
+  const previousValue = previous?.value ?? "";
+
+  const now = new Date().toISOString();
+  const newSpecValue = {
+    companyId: decision.specCompanyId,
+    value: String(decision.specValue ?? ""),
+    meetingId: decision.meetingId,
+    updatedAt: now,
+  };
+  const newItem = {
+    ...item,
+    values: [
+      ...(item.values || []).filter((v) => v.companyId !== decision.specCompanyId),
+      newSpecValue,
+    ],
+  };
+  const newSpecItems = specItemsBefore.map((i) => (i.id === newItem.id ? newItem : i));
+  const newChangeLog = buildChangeLogInline({
+    specItemId: decision.specItemId,
+    companyId: decision.specCompanyId,
+    previousValue,
+    newValue: decision.specValue ?? "",
+    meetingId: decision.meetingId,
+    reason,
+  });
+
+  // フェーズ 1: SpecItem 保存
+  try {
+    await saveWithCapacityCheck(STORAGE_KEYS.SPEC_ITEMS, newSpecItems, showToast);
+  } catch (e) {
+    showToast?.("error", "仕様の反映に失敗しました。元の状態のままです。");
+    throw e;
+  }
+
+  // フェーズ 2: ChangeLog 保存 (失敗時 SpecItem をロールバック)
+  try {
+    await saveWithCapacityCheck(STORAGE_KEYS.CHANGE_LOGS, [...changeLogsBefore, newChangeLog], showToast);
+  } catch (e) {
+    try {
+      await saveWithCapacityCheck(STORAGE_KEYS.SPEC_ITEMS, specItemsBefore, showToast);
+    } catch { /* ロールバック失敗は別Toastで通知済み */ }
+    showToast?.("error", "仕様の反映に失敗しました。元の状態に戻しました。");
+    throw e;
+  }
+
+  return { specItem: newItem, changeLog: newChangeLog };
+}
+
+// ---- 仕様反映ダイアログ ----
+
+export function SpecReflectionDialog({ decision, specItem, company, onConfirm, onClose, saveDisabled }) {
+  const [reason, setReason] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const titleId = useMemo(() => `spec-reflection-title-${Math.random().toString(36).slice(2, 8)}`, []);
+
+  useEffect(() => {
+    const handler = (e) => { if (e.key === "Escape" && !submitting) onClose(); };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [onClose, submitting]);
+
+  const previousValue = useMemo(() => {
+    if (!specItem) return "";
+    const v = (specItem.values || []).find((sv) => sv.companyId === decision.specCompanyId);
+    return v?.value ?? "";
+  }, [specItem, decision.specCompanyId]);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      await onConfirm({ reason: reason.trim() || undefined });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-center justify-center p-4 overflow-y-auto"
+      style={{ background: "rgba(26,24,22,0.45)" }}
+      role="dialog" aria-modal="true" aria-labelledby={titleId}
+      data-testid="spec-reflection-dialog"
+    >
+      <form onSubmit={handleSubmit} noValidate
+        className="bg-bg rounded-2xl max-w-lg w-full p-7"
+        style={{ boxShadow: "0 16px 48px rgba(26,24,22,0.22)", border: "1px solid var(--rule)" }}>
+        <div className="flex items-baseline justify-between mb-4">
+          <h2 id={titleId} className="text-lg text-ink" style={{ fontFamily: "var(--jp-serif)", fontWeight: 600 }}>
+            仕様を更新しますか？
+          </h2>
+          <span className="font-serif-en text-xs uppercase text-wood-deep tracking-widest">Reflect</span>
+        </div>
+
+        <dl className="space-y-3 text-sm">
+          <div className="flex gap-3 items-baseline">
+            <dt className="text-xs text-ink-soft w-24 shrink-0" style={{ letterSpacing: "0.08em" }}>仕様項目</dt>
+            <dd className="text-ink" data-testid="spec-reflection-item-name">
+              {specItem ? specItem.name : "[削除済み仕様項目]"}
+            </dd>
+          </div>
+          <div className="flex gap-3 items-baseline">
+            <dt className="text-xs text-ink-soft w-24 shrink-0" style={{ letterSpacing: "0.08em" }}>会社</dt>
+            <dd className="text-ink" data-testid="spec-reflection-company-name">
+              {company ? company.name : "[削除済み会社]"}
+            </dd>
+          </div>
+          <div className="flex gap-3 items-baseline">
+            <dt className="text-xs text-ink-soft w-24 shrink-0" style={{ letterSpacing: "0.08em" }}>変更前</dt>
+            <dd className="text-ink-soft whitespace-pre-line" data-testid="spec-reflection-previous">
+              {previousValue || "—"}
+            </dd>
+          </div>
+          <div className="flex gap-3 items-baseline">
+            <dt className="text-xs text-ink-soft w-24 shrink-0" style={{ letterSpacing: "0.08em" }}>変更後</dt>
+            <dd className="text-ink whitespace-pre-line font-medium" data-testid="spec-reflection-new">
+              {decision.specValue ?? ""}
+            </dd>
+          </div>
+        </dl>
+
+        <div className="mt-5">
+          <Field label="変更理由 (任意・ChangeLog に記録)" htmlFor="sr-reason" max={500} value={reason}>
+            <input id="sr-reason" type="text"
+              data-testid="spec-reflection-reason-input"
+              value={reason} onChange={(e) => setReason(e.target.value)} maxLength={1000}
+              className="w-full px-3 py-2 rounded-lg border border-rule bg-bg text-sm focus-visible:outline focus-visible:outline-2 ring-rust" />
+          </Field>
+        </div>
+
+        <div className="mt-6 flex justify-end gap-3">
+          <button type="button" onClick={onClose} disabled={submitting}
+            data-testid="spec-reflection-cancel"
+            className="px-5 py-2 rounded-full border border-rule text-ink-soft hover:bg-paper disabled:opacity-40">
+            キャンセル
+          </button>
+          <button type="submit" disabled={submitting || saveDisabled || !specItem}
+            data-testid="spec-reflection-confirm"
+            className="px-6 py-2 rounded-full bg-rust text-white text-sm hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed">
+            ✅ 反映する
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+// ---- 変更ログタイムライン ----
+
+const CHANGELOG_INITIAL_COUNT = 30;
+const CHANGELOG_LOAD_MORE = 20;
+
+function ChangeLogEntry({ log, specItem, company, meeting, onNavigateToMeeting }) {
+  return (
+    <article className="bg-paper border border-rule rounded-2xl p-5" data-testid={`change-log-entry-${log.id}`}>
+      <div className="flex items-baseline justify-between gap-3 mb-2">
+        <h3 className="text-sm text-ink" style={{ fontFamily: "var(--jp-serif)", fontWeight: 600 }}>
+          {specItem ? specItem.name : "[削除済み仕様項目]"}
+          {company && <span className="text-xs text-ink-soft ml-2">/ {company.name}</span>}
+          {!company && <span className="text-xs text-ink-soft ml-2">/ [削除済み会社]</span>}
+        </h3>
+        <span className="font-mono text-[11px] text-ink-soft" data-testid={`change-log-date-${log.id}`}>
+          {(log.changedAt || "").slice(0, 10)}
+        </span>
+      </div>
+      <div className="text-sm space-y-1">
+        <div className="flex gap-3">
+          <span className="text-xs text-ink-soft w-16 shrink-0" style={{ letterSpacing: "0.08em" }}>変更前</span>
+          <span className="text-ink-soft whitespace-pre-line break-words">{log.previousValue || "—"}</span>
+        </div>
+        <div className="flex gap-3">
+          <span className="text-xs text-ink-soft w-16 shrink-0" style={{ letterSpacing: "0.08em" }}>変更後</span>
+          <span className="text-ink whitespace-pre-line break-words font-medium">{log.newValue || "—"}</span>
+        </div>
+        {log.reason && (
+          <div className="flex gap-3 mt-2 pt-2 border-t border-rule/60">
+            <span className="text-xs text-ink-soft w-16 shrink-0" style={{ letterSpacing: "0.08em" }}>理由</span>
+            <span className="text-ink-soft">{log.reason}</span>
+          </div>
+        )}
+      </div>
+      {meeting && (
+        <div className="mt-3 pt-3 border-t border-rule/60 flex items-center justify-between">
+          <span className="text-xs text-ink-soft">
+            <span className="font-serif-en uppercase text-[10px] tracking-widest mr-2 opacity-70">From</span>
+            {meeting.title}
+          </span>
+          {onNavigateToMeeting && (
+            <button type="button"
+              data-testid={`change-log-meeting-link-${log.id}`}
+              onClick={() => onNavigateToMeeting(meeting)}
+              className="text-xs px-3 py-1 rounded-full border border-rule text-ink-soft hover:text-ink hover:border-wood-deep">
+              打ち合わせを開く →
+            </button>
+          )}
+        </div>
+      )}
+    </article>
+  );
+}
+
+export function ChangeLogsView() {
+  const [companies, setCompanies] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [specItems, setSpecItems] = useState([]);
+  const [meetings, setMeetings] = useState([]);
+  const [logs, setLogs] = useState(null);
+
+  const [companyFilter, setCompanyFilter] = useState("all");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [visibleCount, setVisibleCount] = useState(CHANGELOG_INITIAL_COUNT);
+
+  const reload = useCallback(async () => {
+    setCompanies(await loadCompaniesFromStorage());
+    setCategories(await loadCategoriesFromStorage());
+    setSpecItems(await loadSpecItemsFromStorage());
+    setMeetings(await loadMeetingsFromStorage());
+    setLogs(await loadChangeLogsFromStorage());
+  }, []);
+
+  useEffect(() => { reload(); }, [reload]);
+
+  if (logs === null) return <Spinner label="変更ログを読み込み中..." />;
+
+  // sortChangeLogsDesc 相当 (changedAt 降順)
+  const sorted = [...logs].sort((a, b) =>
+    (b.changedAt || "").localeCompare(a.changedAt || "")
+  );
+
+  const filtered = sorted.filter((l) => {
+    if (companyFilter !== "all" && l.companyId !== companyFilter) return false;
+    if (categoryFilter !== "all") {
+      const item = specItems.find((s) => s.id === l.specItemId);
+      if (!item || item.categoryId !== categoryFilter) return false;
+    }
+    if (dateFrom) {
+      const d = (l.changedAt || "").slice(0, 10);
+      if (d < dateFrom) return false;
+    }
+    if (dateTo) {
+      const d = (l.changedAt || "").slice(0, 10);
+      if (d > dateTo) return false;
+    }
+    return true;
+  });
+
+  const visible = filtered.slice(0, visibleCount);
+  const hasMore = visibleCount < filtered.length;
+
+  // Sprint 4 動作確認チェックリスト「ChangeLog 削除UI なし」のために、UI 側に削除ボタンを一切置かない
+  // (改ざん防止 - Spec.md §3-4)
+
+  return (
+    <div data-testid="change-logs-view">
+      <div className="flex items-baseline justify-between mb-5 gap-3 flex-wrap">
+        <div>
+          <h2 className="text-xl text-ink" style={{ fontFamily: "var(--jp-serif)", fontWeight: 600 }}>
+            変更ログ
+          </h2>
+          <p className="font-serif-en text-[11px] uppercase tracking-widest text-wood-deep mt-1">
+            Change Log / {filtered.length} entries
+          </p>
+        </div>
+      </div>
+
+      {logs.length > 0 && (
+        <div className="bg-paper border border-rule rounded-2xl p-4 mb-6 no-print">
+          <p className="font-serif-en text-[10px] uppercase tracking-widest text-wood-deep mb-3">Filters</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+            <div>
+              <label htmlFor="cl-company" className="text-ink-soft" style={{ letterSpacing: "0.08em" }}>会社</label>
+              <select id="cl-company" data-testid="change-log-filter-company"
+                value={companyFilter} onChange={(e) => setCompanyFilter(e.target.value)}
+                className="mt-1 w-full px-3 py-1.5 rounded-lg border border-rule bg-bg text-sm focus-visible:outline focus-visible:outline-2 ring-rust">
+                <option value="all">すべて</option>
+                {companies.map((co) => <option key={co.id} value={co.id}>{co.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="cl-category" className="text-ink-soft" style={{ letterSpacing: "0.08em" }}>カテゴリ</label>
+              <select id="cl-category" data-testid="change-log-filter-category"
+                value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}
+                className="mt-1 w-full px-3 py-1.5 rounded-lg border border-rule bg-bg text-sm focus-visible:outline focus-visible:outline-2 ring-rust">
+                <option value="all">すべて</option>
+                {categories.filter((c) => !c.deletedAt).map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="cl-from" className="text-ink-soft" style={{ letterSpacing: "0.08em" }}>開始日</label>
+              <input id="cl-from" type="date" data-testid="change-log-filter-from"
+                value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
+                className="mt-1 w-full px-3 py-1.5 rounded-lg border border-rule bg-bg text-sm font-mono focus-visible:outline focus-visible:outline-2 ring-rust" />
+            </div>
+            <div>
+              <label htmlFor="cl-to" className="text-ink-soft" style={{ letterSpacing: "0.08em" }}>終了日</label>
+              <input id="cl-to" type="date" data-testid="change-log-filter-to"
+                value={dateTo} onChange={(e) => setDateTo(e.target.value)}
+                className="mt-1 w-full px-3 py-1.5 rounded-lg border border-rule bg-bg text-sm font-mono focus-visible:outline focus-visible:outline-2 ring-rust" />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {filtered.length === 0 ? (
+        <EmptyState
+          icon="📜"
+          title={logs.length === 0 ? "まだ仕様の変更がありません" : "条件に一致する変更ログがありません"}
+          description={logs.length === 0
+            ? "仕様比較タブからセルを編集するか、打ち合わせから「仕様に反映」すると履歴が記録されます。"
+            : "フィルター条件を変更してください。"}
+          testId="change-logs-empty-state"
+        />
+      ) : (
+        <>
+          <div className="space-y-4" data-testid="change-log-timeline">
+            {visible.map((l) => (
+              <ChangeLogEntry key={l.id} log={l}
+                specItem={specItems.find((s) => s.id === l.specItemId)}
+                company={companies.find((c) => c.id === l.companyId)}
+                meeting={meetings.find((m) => m.id === l.meetingId)}
+              />
+            ))}
+          </div>
+          {hasMore && (
+            <div className="mt-6 flex justify-center">
+              <button type="button"
+                data-testid="change-log-load-more"
+                onClick={() => setVisibleCount((n) => n + CHANGELOG_LOAD_MORE)}
+                className="px-5 py-2 rounded-full border border-rule text-sm text-ink-soft hover:text-ink hover:border-wood-deep">
+                さらに表示 ({filtered.length - visibleCount} 件)
+              </button>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
 
 // ===== 8. ダッシュボード =====
 // Sprint 5 で実装
@@ -3701,7 +4129,9 @@ function AppInner() {
         {currentTab === "companies" && <CompaniesView saveDisabled={saveDisabled} />}
         {currentTab === "spec-comparison" && <SpecComparisonView saveDisabled={saveDisabled} />}
         {currentTab === "meetings" && <MeetingsView saveDisabled={saveDisabled} />}
-        {currentTab !== "companies" && currentTab !== "spec-comparison" && currentTab !== "meetings" && (
+        {currentTab === "change-logs" && <ChangeLogsView />}
+        {currentTab !== "companies" && currentTab !== "spec-comparison"
+          && currentTab !== "meetings" && currentTab !== "change-logs" && (
           <TabPlaceholder tabId={currentTab} />
         )}
 
