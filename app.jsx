@@ -2380,7 +2380,1013 @@ export function SpecComparisonView({ saveDisabled }) {
 }
 
 // ===== 6. 打ち合わせコンポーネント =====
-// Sprint 3 で実装
+
+// ---- Sprint 3 内部ユーティリティ (src/utils/meeting.js / decision.js のミラー) ----
+
+const DATE_PATTERN_INLINE = /^\d{4}-\d{2}-\d{2}$/;
+
+function generateMeetingTitleInline(date, companyName, existingTitles = []) {
+  const base = `${date} ${companyName}`;
+  const escaped = base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`^${escaped}(?:\\s+\\(\\d+\\))?$`);
+  const matches = existingTitles.filter((t) => re.test(t));
+  if (matches.length === 0) return base;
+  return `${base} (${matches.length + 1})`;
+}
+
+function parseAttendeesInline(raw) {
+  if (!raw || typeof raw !== "string") return [];
+  return raw.split(/[,，]/).map((s) => s.trim()).filter(Boolean);
+}
+
+function formatAttendeesInline(attendees) {
+  return Array.isArray(attendees) ? attendees.join(", ") : "";
+}
+
+function isFutureDateInline(dateStr, now = new Date()) {
+  if (!dateStr || !DATE_PATTERN_INLINE.test(dateStr)) return false;
+  const today = new Date(now); today.setHours(0, 0, 0, 0);
+  const target = new Date(`${dateStr}T00:00:00`);
+  return target.getTime() > today.getTime();
+}
+
+function validateMeetingInline(input) {
+  const errors = {};
+  const date = String(input?.date ?? "");
+  if (date.length === 0) errors.date = "日付は必須です";
+  else if (!DATE_PATTERN_INLINE.test(date)) errors.date = "日付の形式が不正です (YYYY-MM-DD)";
+
+  const agenda = String(input?.agenda ?? "");
+  if (agenda.trim().length === 0) errors.agenda = "議題は必須です";
+  else if (agenda.length > 1000) errors.agenda = "1000文字以内で入力してください";
+
+  if (input?.summary && String(input.summary).length > 2000)
+    errors.summary = "2000文字以内で入力してください";
+  if (input?.location && String(input.location).length > 100)
+    errors.location = "100文字以内で入力してください";
+
+  let arr = input?.attendees;
+  if (typeof arr === "string") arr = parseAttendeesInline(arr);
+  if (Array.isArray(arr)) {
+    if (arr.length > 20) errors.attendees = "参加者は20人以内で入力してください";
+    else if (arr.some((a) => String(a).length > 30))
+      errors.attendees = "参加者1人の名前は30文字以内です";
+  }
+
+  if (!input?.companyId) errors.companyId = "会社は必須です";
+  return errors;
+}
+
+function validateDecisionInline(input) {
+  const errors = {};
+  const content = String(input?.content ?? "");
+  if (content.trim().length === 0) errors.content = "決定内容は必須です";
+  else if (content.length > 1000) errors.content = "1000文字以内で入力してください";
+  if (input?.specValue && String(input.specValue).length > 200)
+    errors.specValue = "200文字以内で入力してください";
+  if (input?.note && String(input.note).length > 500)
+    errors.note = "500文字以内で入力してください";
+  return errors;
+}
+
+async function loadMeetingsFromStorage() {
+  const raw = await storage.getItem(STORAGE_KEYS.MEETINGS);
+  if (!raw) return [];
+  try { const v = JSON.parse(raw); return Array.isArray(v) ? v : []; } catch { return []; }
+}
+async function loadDecisionsFromStorage() {
+  const raw = await storage.getItem(STORAGE_KEYS.DECISIONS);
+  if (!raw) return [];
+  try { const v = JSON.parse(raw); return Array.isArray(v) ? v : []; } catch { return []; }
+}
+
+// ---- 決定事項ステータスバッジ ----
+
+const DECISION_STATUS_BADGE = {
+  pending:   { bg: "bg-paper",    text: "text-wood-deep", border: "border-rule" },
+  confirmed: { bg: "bg-sage",     text: "text-white",     border: "border-transparent" },
+  cancelled: { bg: "bg-bg",       text: "text-ink-soft",  border: "border-rule" },
+};
+
+function DecisionStatusBadge({ status, testId }) {
+  const s = DECISION_STATUS_BADGE[status] || DECISION_STATUS_BADGE.pending;
+  return (
+    <span data-testid={testId}
+      className={`inline-flex items-center px-3 py-0.5 rounded-full text-[11px] border ${s.bg} ${s.text} ${s.border}`}
+      style={{ letterSpacing: "0.12em", fontWeight: 500 }}>
+      {DECISION_STATUS_LABEL[status] || status}
+    </span>
+  );
+}
+
+// ---- 前回の打ち合わせパネル ----
+
+function PrevMeetingPanel({ company, prevMeeting }) {
+  const [open, setOpen] = useState(false);
+  if (!company || !prevMeeting) return null;
+  return (
+    <div className="bg-paper border border-rule rounded-2xl p-4" data-testid="prev-meeting-panel">
+      <button type="button"
+        data-testid="prev-meeting-toggle"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between text-left">
+        <span className="text-sm text-ink-soft">
+          <span className="font-serif-en text-[10px] uppercase tracking-widest mr-2 opacity-70">Prev</span>
+          {company.name} の前回の打ち合わせ
+          <span className="ml-2 font-mono text-xs text-ink">{prevMeeting.date}</span>
+        </span>
+        <span aria-hidden="true" className="text-ink-soft">{open ? "▲" : "▼"}</span>
+      </button>
+      {open && (
+        <div className="mt-3 pt-3 border-t border-rule text-sm text-ink-soft space-y-2">
+          <p className="text-ink"><span className="text-ink-soft mr-2">議題:</span>{prevMeeting.agenda}</p>
+          {prevMeeting.summary && (
+            <p className="text-ink-soft whitespace-pre-line">
+              <span className="mr-2">まとめ:</span>{prevMeeting.summary}
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---- 決定事項インライン編集行 ----
+
+function DecisionInlineRow({ decision, idx, companies, defaultCompanyId, categories, specItems, errors, onChange, onRemove }) {
+  const NEW_ITEM = "__new_item__";
+  const NEW_CAT = "__new_category__";
+  const isNewItem = decision.__newItem === true;
+  const activeItems = specItems.filter((s) => !s.deletedAt);
+  const activeCats = categories.filter((c) => !c.deletedAt).sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+
+  const update = (key, value) => onChange({ ...decision, [key]: value });
+
+  const handleSpecItemSelect = (e) => {
+    const v = e.target.value;
+    if (v === NEW_ITEM) {
+      onChange({
+        ...decision, __newItem: true,
+        specItemId: null,
+        __newItemName: "",
+        __newCategoryId: activeCats[0]?.id || NEW_CAT,
+        __newCategoryName: "",
+      });
+    } else if (v === "") {
+      onChange({ ...decision, __newItem: false, specItemId: null, __newItemName: null });
+    } else {
+      onChange({ ...decision, __newItem: false, specItemId: v, __newItemName: null });
+    }
+  };
+
+  return (
+    <div className="border border-rule rounded-xl p-4 bg-paper/40 relative" data-testid={`decision-row-${idx}`}>
+      <button type="button" onClick={onRemove}
+        data-testid={`decision-remove-${idx}`}
+        aria-label="この決定事項を削除"
+        className="absolute top-2 right-2 text-ink-soft hover:text-rust text-sm">
+        ✕
+      </button>
+      <div className="flex items-baseline gap-2 mb-3">
+        <span className="font-serif-en uppercase text-[10px] tracking-widest text-wood-deep">Decision #{idx + 1}</span>
+      </div>
+
+      <Field label="決定内容 *" htmlFor={`d-content-${idx}`} error={errors?.content} max={1000} value={decision.content}>
+        <textarea id={`d-content-${idx}`} data-testid={`decision-content-input-${idx}`}
+          value={decision.content || ""} onChange={(e) => update("content", e.target.value)}
+          rows={2} maxLength={2000}
+          className="w-full px-3 py-2 rounded-lg border border-rule bg-bg text-sm leading-relaxed focus-visible:outline focus-visible:outline-2 ring-rust" />
+      </Field>
+
+      <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+        <Field label="ステータス" htmlFor={`d-status-${idx}`}>
+          <select id={`d-status-${idx}`} data-testid={`decision-status-select-${idx}`}
+            value={decision.status || "pending"}
+            onChange={(e) => update("status", e.target.value)}
+            className="w-full px-3 py-2 rounded-lg border border-rule bg-bg text-sm focus-visible:outline focus-visible:outline-2 ring-rust">
+            {Object.entries(DECISION_STATUS_LABEL).map(([k, v]) => (
+              <option key={k} value={k}>{v}</option>
+            ))}
+          </select>
+        </Field>
+        <Field label="メモ" htmlFor={`d-note-${idx}`} error={errors?.note} max={500} value={decision.note}>
+          <input id={`d-note-${idx}`} type="text" data-testid={`decision-note-input-${idx}`}
+            value={decision.note || ""} onChange={(e) => update("note", e.target.value)}
+            maxLength={1000}
+            className="w-full px-3 py-2 rounded-lg border border-rule bg-bg text-sm focus-visible:outline focus-visible:outline-2 ring-rust" />
+        </Field>
+      </div>
+
+      <div className="mt-4 pt-3 border-t border-rule">
+        <p className="font-serif-en uppercase text-[10px] tracking-widest text-wood-deep mb-2">Spec Reflection</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <label htmlFor={`d-spec-item-${idx}`} className="text-xs text-ink-soft" style={{ letterSpacing: "0.08em" }}>仕様項目</label>
+            <select id={`d-spec-item-${idx}`} data-testid={`decision-spec-item-select-${idx}`}
+              value={isNewItem ? NEW_ITEM : (decision.specItemId || "")}
+              onChange={handleSpecItemSelect}
+              className="mt-1 w-full px-3 py-2 rounded-lg border border-rule bg-bg text-sm focus-visible:outline focus-visible:outline-2 ring-rust">
+              <option value="">— 紐付けなし —</option>
+              {activeItems.map((it) => {
+                const cat = activeCats.find((c) => c.id === it.categoryId);
+                return <option key={it.id} value={it.id}>{cat ? `[${cat.name}] ` : ""}{it.name}</option>;
+              })}
+              <option value={NEW_ITEM}>+ 新規仕様項目を作成して反映</option>
+            </select>
+          </div>
+          <div>
+            <label htmlFor={`d-spec-company-${idx}`} className="text-xs text-ink-soft" style={{ letterSpacing: "0.08em" }}>会社</label>
+            <select id={`d-spec-company-${idx}`} data-testid={`decision-spec-company-select-${idx}`}
+              value={decision.specCompanyId || defaultCompanyId || ""}
+              onChange={(e) => update("specCompanyId", e.target.value)}
+              className="mt-1 w-full px-3 py-2 rounded-lg border border-rule bg-bg text-sm focus-visible:outline focus-visible:outline-2 ring-rust">
+              {companies.filter((co) => !co.deletedAt).map((co) => (
+                <option key={co.id} value={co.id}>{co.name}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {isNewItem && (
+          <div className="mt-3 p-3 rounded-lg border border-dashed border-wood-deep bg-bg" data-testid={`decision-new-item-form-${idx}`}>
+            <p className="font-serif-en text-[10px] uppercase tracking-widest text-wood-deep mb-2">New Spec Item</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <Field label="項目名 *" htmlFor={`d-new-name-${idx}`} max={50} value={decision.__newItemName}>
+                <input id={`d-new-name-${idx}`} type="text"
+                  data-testid={`decision-new-spec-item-name-input-${idx}`}
+                  value={decision.__newItemName || ""}
+                  onChange={(e) => update("__newItemName", e.target.value)}
+                  maxLength={120}
+                  className="w-full px-3 py-2 rounded-lg border border-rule bg-bg text-sm focus-visible:outline focus-visible:outline-2 ring-rust" />
+              </Field>
+              <div>
+                <label htmlFor={`d-new-cat-${idx}`} className="text-xs text-ink-soft" style={{ letterSpacing: "0.08em" }}>カテゴリ *</label>
+                <select id={`d-new-cat-${idx}`} data-testid={`decision-new-spec-item-category-select-${idx}`}
+                  value={decision.__newCategoryId || ""}
+                  onChange={(e) => update("__newCategoryId", e.target.value)}
+                  className="mt-1 w-full px-3 py-2 rounded-lg border border-rule bg-bg text-sm focus-visible:outline focus-visible:outline-2 ring-rust">
+                  {activeCats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  <option value={NEW_CAT}>+ 新規カテゴリ作成</option>
+                </select>
+              </div>
+            </div>
+            {decision.__newCategoryId === NEW_CAT && (
+              <div className="mt-2">
+                <Field label="新規カテゴリ名 *" htmlFor={`d-new-cat-name-${idx}`} max={30} value={decision.__newCategoryName}>
+                  <input id={`d-new-cat-name-${idx}`} type="text"
+                    data-testid={`decision-new-category-name-input-${idx}`}
+                    value={decision.__newCategoryName || ""}
+                    onChange={(e) => update("__newCategoryName", e.target.value)}
+                    maxLength={60}
+                    className="w-full px-3 py-2 rounded-lg border border-rule bg-bg text-sm focus-visible:outline focus-visible:outline-2 ring-rust" />
+                </Field>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="mt-3">
+          <Field label="仕様値 (反映する値)" htmlFor={`d-spec-value-${idx}`} error={errors?.specValue} max={200} value={decision.specValue}>
+            <input id={`d-spec-value-${idx}`} type="text" data-testid={`decision-spec-value-input-${idx}`}
+              value={decision.specValue || ""} onChange={(e) => update("specValue", e.target.value)}
+              maxLength={400}
+              placeholder="例: 高性能GW 24K"
+              className="w-full px-3 py-2 rounded-lg border border-rule bg-bg text-sm focus-visible:outline focus-visible:outline-2 ring-rust" />
+          </Field>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---- 打ち合わせフォームモーダル ----
+
+export function MeetingFormModal({ initial, companies, categories, specItems, meetings, onSubmit, onClose, saveDisabled }) {
+  const showToast = useToast();
+  const isEdit = Boolean(initial?.id);
+
+  const [form, setForm] = useState(() => {
+    const defaultCompanyId = initial?.companyId ?? companies[0]?.id ?? "";
+    return {
+      date: initial?.date ?? new Date().toISOString().slice(0, 10),
+      companyId: defaultCompanyId,
+      title: initial?.title ?? "",
+      location: initial?.location ?? "",
+      attendees: formatAttendeesInline(initial?.attendees ?? []),
+      agenda: initial?.agenda ?? "",
+      summary: initial?.summary ?? "",
+    };
+  });
+  const [decisions, setDecisions] = useState(() => initial?.__decisions ?? []);
+  const [errors, setErrors] = useState({});
+  const [decisionErrors, setDecisionErrors] = useState({});
+  const titleId = useMemo(() => `meeting-form-title-${Math.random().toString(36).slice(2, 8)}`, []);
+
+  useEffect(() => {
+    const handler = (e) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  const update = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
+
+  const selectedCompany = companies.find((c) => c.id === form.companyId);
+  const prevMeeting = useMemo(() => {
+    if (!form.companyId) return null;
+    const filtered = meetings
+      .filter((m) => !m.deletedAt && m.companyId === form.companyId && m.id !== initial?.id)
+      .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+    return filtered[0] || null;
+  }, [meetings, form.companyId, initial?.id]);
+
+  const handleAddDecision = () => {
+    setDecisions((d) => [...d, {
+      content: "", status: "pending", note: "",
+      specItemId: null, specCompanyId: form.companyId, specValue: "",
+    }]);
+  };
+  const handleRemoveDecision = (idx) => {
+    setDecisions((d) => d.filter((_, i) => i !== idx));
+    setDecisionErrors((e) => {
+      const next = { ...e };
+      delete next[idx];
+      return next;
+    });
+  };
+  const handleDecisionChange = (idx, next) => {
+    setDecisions((arr) => arr.map((d, i) => (i === idx ? next : d)));
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    const meetingErrors = validateMeetingInline({
+      date: form.date,
+      agenda: form.agenda,
+      summary: form.summary,
+      location: form.location,
+      attendees: form.attendees,
+      companyId: form.companyId,
+    });
+    setErrors(meetingErrors);
+
+    // 各決定事項のバリデーション
+    const dErrs = {};
+    decisions.forEach((d, idx) => {
+      const errs = validateDecisionInline(d);
+      // 新規仕様項目作成時のフィールド検証
+      if (d.__newItem === true) {
+        const name = String(d.__newItemName || "").trim();
+        if (name.length === 0) errs.__newItemName = "項目名は必須です";
+        if (d.__newCategoryId === "__new_category__") {
+          const catName = String(d.__newCategoryName || "").trim();
+          if (catName.length === 0) errs.__newCategoryName = "カテゴリ名は必須です";
+        } else if (!d.__newCategoryId) {
+          errs.__newCategoryName = "カテゴリを選択してください";
+        }
+      }
+      if (Object.keys(errs).length > 0) dErrs[idx] = errs;
+    });
+    setDecisionErrors(dErrs);
+
+    if (Object.keys(meetingErrors).length > 0 || Object.keys(dErrs).length > 0) return;
+
+    // E15: 未来日付の warning Toast (登録はブロックしない)
+    if (isFutureDateInline(form.date)) {
+      showToast("warning", "未来の日付が設定されています。予定として登録します。");
+    }
+    onSubmit({ ...form, decisions });
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-center justify-center p-4 overflow-y-auto"
+      style={{ background: "rgba(26,24,22,0.45)" }}
+      role="dialog" aria-modal="true" aria-labelledby={titleId}
+      data-testid="meeting-form-modal"
+    >
+      <form onSubmit={handleSubmit} noValidate
+        className="bg-bg rounded-2xl max-w-3xl w-full p-7 my-8"
+        style={{ boxShadow: "0 16px 48px rgba(26,24,22,0.22)", border: "1px solid var(--rule)" }}>
+        <div className="flex items-baseline justify-between mb-5">
+          <h2 id={titleId} className="text-lg text-ink" style={{ fontFamily: "var(--jp-serif)", fontWeight: 600 }}>
+            {isEdit ? "打ち合わせを編集" : "打ち合わせを記録"}
+          </h2>
+          <span className="font-serif-en text-xs uppercase text-wood-deep tracking-widest">Meeting</span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Field label="日付 *" htmlFor="mf-date" error={errors.date}>
+            <input id="mf-date" type="date" data-testid="meeting-date-input"
+              value={form.date} onChange={update("date")}
+              className="w-full px-3 py-2 rounded-lg border border-rule bg-bg text-sm font-mono focus-visible:outline focus-visible:outline-2 ring-rust" />
+          </Field>
+          <Field label="会社 *" htmlFor="mf-company" error={errors.companyId}>
+            <select id="mf-company" data-testid="meeting-company-select"
+              value={form.companyId} onChange={update("companyId")}
+              className="w-full px-3 py-2 rounded-lg border border-rule bg-bg text-sm focus-visible:outline focus-visible:outline-2 ring-rust">
+              {companies.filter((c) => !c.deletedAt).map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="場所" htmlFor="mf-location" error={errors.location} max={100} value={form.location}>
+            <input id="mf-location" type="text" data-testid="meeting-location-input"
+              value={form.location} onChange={update("location")}
+              maxLength={200}
+              className="w-full px-3 py-2 rounded-lg border border-rule bg-bg text-sm focus-visible:outline focus-visible:outline-2 ring-rust" />
+          </Field>
+          <Field label="参加者 (カンマ区切り)" htmlFor="mf-attendees" error={errors.attendees}>
+            <input id="mf-attendees" type="text" data-testid="meeting-attendees-input"
+              value={form.attendees} onChange={update("attendees")}
+              placeholder="田中, 鈴木, 佐藤"
+              className="w-full px-3 py-2 rounded-lg border border-rule bg-bg text-sm focus-visible:outline focus-visible:outline-2 ring-rust" />
+          </Field>
+          <div className="md:col-span-2">
+            <Field label="タイトル (空欄なら自動生成)" htmlFor="mf-title">
+              <input id="mf-title" type="text" data-testid="meeting-title-input"
+                value={form.title} onChange={update("title")}
+                placeholder={selectedCompany ? `${form.date} ${selectedCompany.name}` : "自動生成"}
+                className="w-full px-3 py-2 rounded-lg border border-rule bg-bg text-sm focus-visible:outline focus-visible:outline-2 ring-rust" />
+            </Field>
+          </div>
+          {prevMeeting && (
+            <div className="md:col-span-2">
+              <PrevMeetingPanel company={selectedCompany} prevMeeting={prevMeeting} />
+            </div>
+          )}
+          <div className="md:col-span-2">
+            <Field label="議題 *" htmlFor="mf-agenda" error={errors.agenda} max={1000} value={form.agenda}>
+              <textarea id="mf-agenda" data-testid="meeting-agenda-input"
+                value={form.agenda} onChange={update("agenda")}
+                rows={4} maxLength={2000}
+                className="w-full px-3 py-2 rounded-lg border border-rule bg-bg text-sm leading-relaxed focus-visible:outline focus-visible:outline-2 ring-rust" />
+            </Field>
+          </div>
+          <div className="md:col-span-2">
+            <Field label="まとめ" htmlFor="mf-summary" error={errors.summary} max={2000} value={form.summary}>
+              <textarea id="mf-summary" data-testid="meeting-summary-input"
+                value={form.summary} onChange={update("summary")}
+                rows={4} maxLength={3000}
+                className="w-full px-3 py-2 rounded-lg border border-rule bg-bg text-sm leading-relaxed focus-visible:outline focus-visible:outline-2 ring-rust" />
+            </Field>
+          </div>
+        </div>
+
+        <div className="mt-6 pt-5 border-t border-rule">
+          <div className="flex items-baseline justify-between mb-3">
+            <h3 className="text-sm text-ink" style={{ fontFamily: "var(--jp-serif)", fontWeight: 600 }}>
+              決定事項
+            </h3>
+            <button type="button" onClick={handleAddDecision} data-testid="add-decision-button"
+              className="text-xs px-3 py-1 rounded-full border border-rule text-ink-soft hover:text-ink hover:border-wood-deep">
+              + 決定事項を追加
+            </button>
+          </div>
+          {decisions.length === 0 ? (
+            <p className="text-xs text-ink-soft text-center py-4">決定事項はまだ登録されていません</p>
+          ) : (
+            <div className="space-y-3" data-testid="decision-list">
+              {decisions.map((d, idx) => (
+                <DecisionInlineRow key={idx} decision={d} idx={idx}
+                  companies={companies} defaultCompanyId={form.companyId}
+                  categories={categories} specItems={specItems}
+                  errors={decisionErrors[idx]}
+                  onChange={(next) => handleDecisionChange(idx, next)}
+                  onRemove={() => handleRemoveDecision(idx)} />
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="mt-7 flex justify-end gap-3">
+          <button type="button" onClick={onClose} data-testid="meeting-cancel-button"
+            className="px-5 py-2 rounded-full border border-rule text-ink-soft hover:bg-paper">
+            キャンセル
+          </button>
+          <button type="submit" data-testid="save-meeting-button" disabled={saveDisabled}
+            className="px-6 py-2 rounded-full bg-rust text-white text-sm hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed">
+            {isEdit ? "更新" : "登録"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+// ---- 打ち合わせカード ----
+
+function MeetingCard({ meeting, company, onClick, onEdit, onDelete, decisionsCount }) {
+  return (
+    <article
+      data-testid={`meeting-card-${meeting.id}`}
+      className="bg-paper border border-rule rounded-2xl p-5 hover:border-wood-deep transition cursor-pointer"
+      onClick={onClick}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } }}
+      role="button"
+      tabIndex={0}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <h3 className="text-base text-ink truncate" style={{ fontFamily: "var(--jp-serif)", fontWeight: 600 }}>
+            {meeting.title}
+          </h3>
+          <p className="text-xs text-ink-soft mt-1">
+            <span className="font-mono">{meeting.date}</span>
+            {company && <> <span className="mx-2 opacity-50">·</span> {company.name}</>}
+            {meeting.location && <> <span className="mx-2 opacity-50">·</span> {meeting.location}</>}
+          </p>
+        </div>
+        <span className="font-serif-en text-[10px] uppercase tracking-widest text-wood-deep">
+          {decisionsCount ?? 0} decisions
+        </span>
+      </div>
+      {meeting.agenda && (
+        <p className="mt-3 text-xs text-ink-soft leading-relaxed line-clamp-2">{meeting.agenda}</p>
+      )}
+      {meeting.summary && (
+        <p className="mt-2 text-xs text-ink-soft leading-relaxed line-clamp-3 border-l-2 border-rule pl-2"
+           data-testid={`meeting-summary-${meeting.id}`}>
+          {meeting.summary.length > 100 ? `${meeting.summary.slice(0, 100)}...` : meeting.summary}
+        </p>
+      )}
+      <div className="mt-4 flex justify-end gap-2 border-t border-rule/60 pt-3" onClick={(e) => e.stopPropagation()}>
+        <button type="button" onClick={onEdit} data-testid={`edit-meeting-button-${meeting.id}`}
+          className="text-xs px-3 py-1 rounded-full border border-rule text-ink-soft hover:text-ink hover:border-wood-deep">
+          編集
+        </button>
+        <button type="button" onClick={onDelete} data-testid={`delete-meeting-button-${meeting.id}`}
+          className="text-xs px-3 py-1 rounded-full border border-rule text-rust hover:bg-rust hover:text-white">
+          削除
+        </button>
+      </div>
+    </article>
+  );
+}
+
+// ---- 打ち合わせ詳細ページ ----
+
+function DecisionDetailRow({ decision, specItem, company, onChangeStatus, onDelete }) {
+  return (
+    <div className="border border-rule rounded-xl p-4 bg-paper/40" data-testid={`decision-detail-${decision.id}`}>
+      <div className="flex items-start justify-between gap-3 mb-2">
+        <p className="text-sm text-ink leading-relaxed whitespace-pre-line flex-1">{decision.content}</p>
+        <DecisionStatusBadge status={decision.status} testId={`decision-detail-status-${decision.id}`} />
+      </div>
+      {(specItem || decision.specValue) && (
+        <div className="mt-2 text-xs text-ink-soft pt-2 border-t border-rule/60">
+          <span className="font-serif-en uppercase text-[10px] tracking-widest text-wood-deep mr-2">Spec</span>
+          {specItem ? specItem.name : "[削除済み仕様項目]"}
+          {company && <> <span className="mx-1 opacity-50">·</span> {company.name}</>}
+          {decision.specValue && <> <span className="mx-1 opacity-50">→</span> <span className="text-ink">{decision.specValue}</span></>}
+        </div>
+      )}
+      {decision.note && (
+        <p className="mt-2 text-xs text-ink-soft border-l-2 border-rule pl-2">{decision.note}</p>
+      )}
+      <div className="mt-3 flex justify-end gap-2 no-print">
+        <select value={decision.status}
+          onChange={(e) => onChangeStatus(decision, e.target.value)}
+          data-testid={`decision-status-change-${decision.id}`}
+          className="text-xs px-2 py-1 rounded-full border border-rule bg-bg text-ink-soft focus-visible:outline focus-visible:outline-2 ring-rust">
+          {Object.entries(DECISION_STATUS_LABEL).map(([k, v]) => (
+            <option key={k} value={k}>{v}</option>
+          ))}
+        </select>
+        <button type="button" onClick={() => onDelete(decision)}
+          data-testid={`decision-delete-${decision.id}`}
+          className="text-xs px-3 py-1 rounded-full border border-rule text-rust hover:bg-rust hover:text-white">
+          削除
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export function MeetingDetailPage({ meeting, company, decisions, specItems, companies, onClose, onEdit, onChangeStatus, onDeleteDecision }) {
+  if (!meeting) return null;
+  return (
+    <div
+      className="fixed inset-0 z-30 bg-bg overflow-y-auto"
+      data-testid="meeting-detail-page"
+      role="dialog" aria-modal="true" aria-label={`${meeting.title}の詳細`}>
+      <header className="sticky top-0 bg-bg border-b border-rule z-10">
+        <div className="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between gap-4">
+          <button type="button" onClick={onClose} data-testid="meeting-detail-close"
+            className="text-sm text-ink-soft hover:text-ink flex items-center gap-1 focus-visible:outline focus-visible:outline-2 ring-rust rounded">
+            <span>←</span> 打ち合わせ一覧
+          </button>
+          <button type="button" onClick={onEdit} data-testid="meeting-detail-edit"
+            className="px-4 py-1.5 rounded-full text-xs bg-rust text-white hover:opacity-90">
+            編集
+          </button>
+        </div>
+      </header>
+
+      <main className="max-w-5xl mx-auto px-4 py-6 space-y-5">
+        <div>
+          <h1 className="text-2xl text-ink" style={{ fontFamily: "var(--jp-serif)", fontWeight: 700 }}>
+            {meeting.title}
+          </h1>
+          <p className="text-xs text-ink-soft mt-2">
+            <span className="font-mono">{meeting.date}</span>
+            {company ? <> <span className="mx-2 opacity-50">·</span> {company.name}</> : <> <span className="mx-2 opacity-50">·</span> [削除済み会社]</>}
+            {meeting.location && <> <span className="mx-2 opacity-50">·</span> {meeting.location}</>}
+          </p>
+        </div>
+
+        {meeting.attendees && meeting.attendees.length > 0 && (
+          <section>
+            <h3 className="font-serif-en text-[11px] uppercase tracking-widest text-wood-deep mb-2">Attendees</h3>
+            <p className="text-sm text-ink">{meeting.attendees.join(", ")}</p>
+          </section>
+        )}
+
+        <section>
+          <h3 className="font-serif-en text-[11px] uppercase tracking-widest text-wood-deep mb-2">Agenda</h3>
+          <p className="text-sm text-ink whitespace-pre-line leading-relaxed">{meeting.agenda}</p>
+        </section>
+
+        {meeting.summary && (
+          <section>
+            <h3 className="font-serif-en text-[11px] uppercase tracking-widest text-wood-deep mb-2">Summary</h3>
+            <p className="text-sm text-ink whitespace-pre-line leading-relaxed">{meeting.summary}</p>
+          </section>
+        )}
+
+        <section>
+          <div className="flex items-baseline justify-between mb-3">
+            <h3 className="text-base text-ink" style={{ fontFamily: "var(--jp-serif)", fontWeight: 600 }}>
+              決定事項 ({decisions.length})
+            </h3>
+          </div>
+          {decisions.length === 0 ? (
+            <p className="text-xs text-ink-soft text-center py-4 border border-dashed border-rule rounded-xl">
+              決定事項はありません
+            </p>
+          ) : (
+            <div className="space-y-3" data-testid="meeting-decision-list">
+              {decisions.map((d) => {
+                const item = specItems.find((s) => s.id === d.specItemId);
+                const co = companies.find((c) => c.id === d.specCompanyId);
+                return <DecisionDetailRow key={d.id} decision={d}
+                  specItem={item} company={co}
+                  onChangeStatus={onChangeStatus}
+                  onDelete={onDeleteDecision} />;
+              })}
+            </div>
+          )}
+        </section>
+      </main>
+    </div>
+  );
+}
+
+// ---- 打ち合わせ一覧ビュー (メイン) ----
+
+const MEETINGS_PER_PAGE = 20;
+
+export function MeetingsView({ saveDisabled }) {
+  const showToast = useToast();
+  const showConfirm = useConfirm();
+
+  const [companies, setCompanies] = useState(null);
+  const [categories, setCategories] = useState([]);
+  const [specItems, setSpecItems] = useState([]);
+  const [meetings, setMeetings] = useState(null);
+  const [decisions, setDecisions] = useState([]);
+
+  const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [detailMeeting, setDetailMeeting] = useState(null);
+  const [companyFilter, setCompanyFilter] = useState("all");
+  const [page, setPage] = useState(1);
+
+  const reload = useCallback(async () => {
+    setCompanies((await loadCompaniesFromStorage()).filter((c) => !c.deletedAt));
+    setCategories(await loadCategoriesFromStorage());
+    setSpecItems(await loadSpecItemsFromStorage());
+    setMeetings(await loadMeetingsFromStorage());
+    setDecisions(await loadDecisionsFromStorage());
+  }, []);
+
+  useEffect(() => { reload(); }, [reload]);
+
+  if (companies === null || meetings === null) return <Spinner label="打ち合わせを読み込み中..." />;
+
+  // 会社0件 → Empty State
+  if (companies.length === 0) {
+    return (
+      <EmptyState
+        icon="🏢"
+        title="先に会社を登録してください"
+        description="打ち合わせを記録するには、関連する会社を「会社管理」タブから登録する必要があります。"
+        testId="meetings-empty-no-companies"
+      />
+    );
+  }
+
+  const activeMeetings = meetings
+    .filter((m) => !m.deletedAt)
+    .filter((m) => companyFilter === "all" || m.companyId === companyFilter)
+    .sort((a, b) => {
+      const ax = a.date || ""; const bx = b.date || "";
+      if (ax === bx) return (b.createdAt || "").localeCompare(a.createdAt || "");
+      return bx.localeCompare(ax);
+    });
+
+  const totalPages = Math.max(1, Math.ceil(activeMeetings.length / MEETINGS_PER_PAGE));
+  const currentPage = Math.min(page, totalPages);
+  const pageMeetings = activeMeetings.slice((currentPage - 1) * MEETINGS_PER_PAGE, currentPage * MEETINGS_PER_PAGE);
+
+  const handleAdd = () => { setEditing(null); setShowForm(true); };
+  const handleEdit = (m) => {
+    const rel = decisions.filter((d) => !d.deletedAt && d.meetingId === m.id);
+    setEditing({ ...m, __decisions: rel });
+    setShowForm(true);
+  };
+
+  const handleSubmit = async (formData) => {
+    try {
+      let cats = categories;
+      let items = specItems;
+      const company = companies.find((c) => c.id === formData.companyId);
+      const companyName = company?.name || "";
+
+      // 1) 各決定事項の「新規仕様項目」を先に解決して specItemId を確定する
+      const resolvedDecisions = [];
+      for (const d of formData.decisions) {
+        let specItemId = d.specItemId || undefined;
+        if (d.__newItem === true) {
+          let categoryId = d.__newCategoryId;
+          if (categoryId === "__new_category__") {
+            const newCat = {
+              id: newId(),
+              createdAt: new Date().toISOString(),
+              name: String(d.__newCategoryName || "").trim(),
+              normalizedName: normalizeCategoryNameInline(d.__newCategoryName),
+              sortOrder: Math.max(0, ...cats.map((c) => c.sortOrder ?? 0)) + 1,
+              isDefault: false,
+            };
+            cats = [...cats, newCat];
+            categoryId = newCat.id;
+          }
+          const newItem = {
+            id: newId(),
+            createdAt: new Date().toISOString(),
+            categoryId,
+            name: String(d.__newItemName || "").trim(),
+            sortOrder: nextSortOrderForCategoryInline(items, categoryId),
+            values: [],
+          };
+          items = [...items, newItem];
+          specItemId = newItem.id;
+        }
+        resolvedDecisions.push({
+          ...d,
+          specItemId,
+          __newItem: undefined, __newItemName: undefined,
+          __newCategoryId: undefined, __newCategoryName: undefined,
+        });
+      }
+
+      // 2) Meeting タイトル決定 (空欄なら自動生成)
+      const titleStr = (formData.title || "").trim();
+      let title = titleStr;
+      if (!title) {
+        const sibTitles = (editing ? meetings.filter((m) => m.id !== editing.id) : meetings)
+          .filter((m) => !m.deletedAt && m.date === formData.date && m.companyId === formData.companyId)
+          .map((m) => m.title)
+          .filter(Boolean);
+        title = generateMeetingTitleInline(formData.date, companyName, sibTitles);
+      }
+
+      // 3) Meeting 構築
+      const attendees = parseAttendeesInline(formData.attendees);
+      const now = new Date().toISOString();
+      const meetingId = editing?.id || newId();
+      const newMeeting = editing ? {
+        ...editing,
+        date: formData.date,
+        companyId: formData.companyId,
+        title,
+        location: formData.location ? String(formData.location).trim() : undefined,
+        attendees,
+        agenda: String(formData.agenda).trim(),
+        summary: formData.summary ? String(formData.summary).trim() : undefined,
+        __decisions: undefined,
+      } : {
+        id: meetingId,
+        createdAt: now,
+        date: formData.date,
+        companyId: formData.companyId,
+        title,
+        location: formData.location ? String(formData.location).trim() : undefined,
+        attendees,
+        agenda: String(formData.agenda).trim(),
+        summary: formData.summary ? String(formData.summary).trim() : undefined,
+      };
+      delete newMeeting.__decisions;
+
+      // 4) Decision を Meeting に紐付け (編集モードでは既存を一旦削除 → 再追加で簡素化)
+      let nextDecisions = decisions;
+      if (editing) {
+        nextDecisions = nextDecisions.filter((d) => d.meetingId !== editing.id || d.deletedAt);
+      }
+      for (const d of resolvedDecisions) {
+        nextDecisions = [...nextDecisions, {
+          id: newId(),
+          createdAt: new Date().toISOString(),
+          meetingId,
+          content: String(d.content || "").trim(),
+          status: d.status || "pending",
+          specItemId: d.specItemId,
+          specCompanyId: d.specCompanyId || formData.companyId,
+          specValue: d.specValue ? String(d.specValue).trim() : undefined,
+          note: d.note ? String(d.note).trim() : undefined,
+        }];
+      }
+
+      // 5) ストレージ書き込み (順序: categories → specItems → meetings → decisions)
+      if (cats !== categories) {
+        await saveWithCapacityCheck(STORAGE_KEYS.CATEGORIES, cats, showToast);
+      }
+      if (items !== specItems) {
+        await saveWithCapacityCheck(STORAGE_KEYS.SPEC_ITEMS, items, showToast);
+      }
+      const allMeetings = editing
+        ? meetings.map((m) => (m.id === editing.id ? newMeeting : m))
+        : [...meetings, newMeeting];
+      await saveWithCapacityCheck(STORAGE_KEYS.MEETINGS, allMeetings, showToast);
+      await saveWithCapacityCheck(STORAGE_KEYS.DECISIONS, nextDecisions, showToast);
+
+      await reload();
+      setShowForm(false);
+      setEditing(null);
+      showToast("success", editing ? "打ち合わせを更新しました" : "打ち合わせを登録しました");
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleDelete = async (meeting) => {
+    const ok = await showConfirm(
+      `「${meeting.title}」を削除しますか？`,
+      "論理削除されます。関連する決定事項も同時に論理削除されます (アーカイブで確認可)。"
+    );
+    if (!ok) return;
+    try {
+      const now = new Date().toISOString();
+      const nextMeetings = meetings.map((m) => (m.id === meeting.id ? { ...m, deletedAt: now } : m));
+      const nextDecisions = decisions.map((d) =>
+        d.meetingId === meeting.id && !d.deletedAt ? { ...d, deletedAt: now } : d
+      );
+      await saveWithCapacityCheck(STORAGE_KEYS.MEETINGS, nextMeetings, showToast);
+      await saveWithCapacityCheck(STORAGE_KEYS.DECISIONS, nextDecisions, showToast);
+      await reload();
+      showToast("success", "打ち合わせを削除しました");
+    } catch (e) { console.error(e); }
+  };
+
+  const handleChangeDecisionStatus = async (decision, status) => {
+    try {
+      const next = decisions.map((d) => (d.id === decision.id ? { ...d, status } : d));
+      await saveWithCapacityCheck(STORAGE_KEYS.DECISIONS, next, showToast);
+      setDecisions(next);
+      showToast("success", `ステータスを「${DECISION_STATUS_LABEL[status]}」に変更しました`);
+    } catch (e) { console.error(e); }
+  };
+
+  const handleDeleteDecision = async (decision) => {
+    const ok = await showConfirm(
+      "この決定事項を削除しますか？",
+      "物理削除されます (元に戻せません)。"
+    );
+    if (!ok) return;
+    try {
+      const next = decisions.filter((d) => d.id !== decision.id);
+      await saveWithCapacityCheck(STORAGE_KEYS.DECISIONS, next, showToast);
+      setDecisions(next);
+      showToast("success", "決定事項を削除しました");
+    } catch (e) { console.error(e); }
+  };
+
+  return (
+    <div data-testid="meetings-view">
+      <div className="flex items-baseline justify-between mb-5 gap-3 flex-wrap">
+        <div>
+          <h2 className="text-xl text-ink" style={{ fontFamily: "var(--jp-serif)", fontWeight: 600 }}>
+            打ち合わせ
+          </h2>
+          <p className="font-serif-en text-[11px] uppercase tracking-widest text-wood-deep mt-1">
+            Meetings / {activeMeetings.length} records
+          </p>
+        </div>
+        <button type="button" onClick={handleAdd} data-testid="add-meeting-button" disabled={saveDisabled}
+          className="px-5 py-2 rounded-full bg-rust text-white text-sm hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed">
+          + 打ち合わせを記録
+        </button>
+      </div>
+
+      {meetings.filter((m) => !m.deletedAt).length > 0 && (
+        <div className="flex flex-wrap gap-2 mb-6">
+          <button type="button" data-testid="meeting-filter-all"
+            onClick={() => { setCompanyFilter("all"); setPage(1); }}
+            className={"px-4 py-1.5 rounded-full text-xs border focus-visible:outline focus-visible:outline-2 ring-rust " +
+              (companyFilter === "all"
+                ? "bg-ink text-bg border-ink"
+                : "bg-bg text-ink-soft border-rule hover:text-ink hover:border-wood-deep")}
+            style={{ letterSpacing: "0.08em" }}>
+            すべての会社
+          </button>
+          {companies.map((co) => (
+            <button key={co.id} type="button"
+              data-testid={`meeting-filter-${co.id}`}
+              onClick={() => { setCompanyFilter(co.id); setPage(1); }}
+              className={"px-4 py-1.5 rounded-full text-xs border focus-visible:outline focus-visible:outline-2 ring-rust " +
+                (companyFilter === co.id
+                  ? "bg-ink text-bg border-ink"
+                  : "bg-bg text-ink-soft border-rule hover:text-ink hover:border-wood-deep")}
+              style={{ letterSpacing: "0.08em" }}>
+              {co.name}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {activeMeetings.length === 0 ? (
+        <EmptyState
+          icon="📅"
+          title="打ち合わせ記録がありません"
+          description="打ち合わせを記録すると、議題・決定事項・仕様反映の経緯を一元管理できます。"
+          action={{ label: "+ 打ち合わせを記録", onClick: handleAdd, testId: "empty-add-meeting-button" }}
+          testId="meetings-empty-state"
+        />
+      ) : (
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+            {pageMeetings.map((m) => {
+              const co = companies.find((c) => c.id === m.companyId);
+              const cnt = decisions.filter((d) => !d.deletedAt && d.meetingId === m.id).length;
+              return <MeetingCard key={m.id} meeting={m} company={co}
+                decisionsCount={cnt}
+                onClick={() => setDetailMeeting(m)}
+                onEdit={() => handleEdit(m)}
+                onDelete={() => handleDelete(m)} />;
+            })}
+          </div>
+          {totalPages > 1 && (
+            <div className="mt-6 flex items-center justify-center gap-3" data-testid="meetings-pagination">
+              <button type="button"
+                data-testid="meetings-prev-page"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                className="px-4 py-1.5 rounded-full border border-rule text-xs text-ink-soft hover:text-ink disabled:opacity-30">
+                ← 前へ
+              </button>
+              <span className="text-xs text-ink-soft font-mono" data-testid="meetings-page-info">
+                {currentPage} / {totalPages}
+              </span>
+              <button type="button"
+                data-testid="meetings-next-page"
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages}
+                className="px-4 py-1.5 rounded-full border border-rule text-xs text-ink-soft hover:text-ink disabled:opacity-30">
+                次へ →
+              </button>
+            </div>
+          )}
+        </>
+      )}
+
+      {showForm && (
+        <MeetingFormModal
+          initial={editing}
+          companies={companies}
+          categories={categories}
+          specItems={specItems}
+          meetings={meetings}
+          onSubmit={handleSubmit}
+          onClose={() => { setShowForm(false); setEditing(null); }}
+          saveDisabled={saveDisabled}
+        />
+      )}
+
+      {detailMeeting && (
+        <MeetingDetailPage
+          meeting={detailMeeting}
+          company={companies.find((c) => c.id === detailMeeting.companyId)}
+          companies={companies}
+          decisions={decisions.filter((d) => !d.deletedAt && d.meetingId === detailMeeting.id)}
+          specItems={specItems}
+          onClose={() => setDetailMeeting(null)}
+          onEdit={() => { const m = detailMeeting; setDetailMeeting(null); handleEdit(m); }}
+          onChangeStatus={handleChangeDecisionStatus}
+          onDeleteDecision={handleDeleteDecision}
+        />
+      )}
+    </div>
+  );
+}
 
 // ===== 7. 変更ログコンポーネント =====
 // Sprint 4 で実装
@@ -2694,7 +3700,8 @@ function AppInner() {
       <main className="max-w-7xl mx-auto px-4 py-6" data-testid="main-content">
         {currentTab === "companies" && <CompaniesView saveDisabled={saveDisabled} />}
         {currentTab === "spec-comparison" && <SpecComparisonView saveDisabled={saveDisabled} />}
-        {currentTab !== "companies" && currentTab !== "spec-comparison" && (
+        {currentTab === "meetings" && <MeetingsView saveDisabled={saveDisabled} />}
+        {currentTab !== "companies" && currentTab !== "spec-comparison" && currentTab !== "meetings" && (
           <TabPlaceholder tabId={currentTab} />
         )}
 
