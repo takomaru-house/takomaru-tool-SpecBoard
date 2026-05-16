@@ -1904,7 +1904,7 @@ function SpecCell({ specItem, company, value, note, onEdit, onNote }) {
 function SpecRow({ specItem, companies, notesByCompany, onCellEdit, onNoteEdit, onItemEdit, onItemDelete, onMoveUp, onMoveDown, saveDisabled, isFirst, isLast }) {
   return (
     <tr data-testid={`spec-row-${specItem.id}`}>
-      <th className="border border-rule bg-paper text-left align-top p-2 min-w-[120px] sticky left-0" scope="row">
+      <th className="border border-rule bg-paper text-left align-top p-2 sticky left-0 overflow-hidden" scope="row">
         <div className="flex items-start gap-1">
           <div className="flex-1 min-w-0">
             <div className="text-sm text-ink truncate" data-testid={`spec-item-name-${specItem.id}`}>{specItem.name}</div>
@@ -2297,10 +2297,19 @@ export function SpecComparisonView({ saveDisabled }) {
         />
       ) : (
         <div className="overflow-auto border border-rule rounded-2xl bg-paper" style={{ maxHeight: "calc(100vh - 180px)" }}>
-          <table className="w-full text-sm" data-testid="spec-table">
+          <table
+            className="text-sm table-fixed"
+            style={{ width: "100%", minWidth: `${120 + 180 * visibleCompanies.length}px` }}
+            data-testid="spec-table">
+            <colgroup>
+              <col style={{ width: 120 }} />
+              {visibleCompanies.map((co) => (
+                <col key={co.id} />
+              ))}
+            </colgroup>
             <thead>
               <tr>
-                <th className="border border-rule p-3 text-left bg-paper min-w-[120px] sticky top-0 left-0 z-30" style={{ fontFamily: "var(--jp-serif)", fontWeight: 600 }}>
+                <th className="border border-rule p-3 text-left bg-paper sticky top-0 left-0 z-30" style={{ fontFamily: "var(--jp-serif)", fontWeight: 600 }}>
                   項目
                 </th>
                 {visibleCompanies.map((co) => (
