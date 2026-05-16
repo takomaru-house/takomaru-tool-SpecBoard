@@ -4734,7 +4734,7 @@ export function SettingsView({ saveDisabled, onClose }) {
                 <option value="overwrite">上書き (既存を全て置換)</option>
               </select>
             </div>
-            <input ref={fileInputRef} type="file" accept="application/json"
+            <input ref={fileInputRef} type="file" accept=".json,application/json"
               data-testid="import-file-input"
               onChange={(e) => handleImportFile(e.target.files?.[0])}
               disabled={saveDisabled || importing}
