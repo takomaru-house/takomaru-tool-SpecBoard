@@ -45,6 +45,13 @@ const STORAGE_KEYS = {
 const STORAGE_WARNING_BYTES = 400_000;
 const STORAGE_BACKUP_SAVE_COUNT = 50;
 
+// iOS / iPadOS 判定: ファイル選択で accept を外す判定に使う
+// (iPadOS 13+ は UA が Mac を名乗るため maxTouchPoints で追加判定)
+const isIOS =
+  typeof navigator !== "undefined" &&
+  (/iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
+
 const COMPANY_STATUS = {
   CONSIDERING: "considering",
   CANDIDATE:   "candidate",
@@ -4734,7 +4741,7 @@ export function SettingsView({ saveDisabled, onClose }) {
                 <option value="overwrite">上書き (既存を全て置換)</option>
               </select>
             </div>
-            <input ref={fileInputRef} type="file" accept=".json,application/json"
+            <input ref={fileInputRef} type="file" accept={isIOS ? undefined : ".json,application/json"}
               data-testid="import-file-input"
               onChange={(e) => handleImportFile(e.target.files?.[0])}
               disabled={saveDisabled || importing}
