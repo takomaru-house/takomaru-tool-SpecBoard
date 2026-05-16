@@ -1,5 +1,5 @@
 // =============================================================================
-// 注文住宅管理ツール - app.jsx
+// 住宅会社仕様比較ツール - app.jsx
 // Sprint 0 実装範囲: 基盤・ストレージ・共通UI・アプリシェル
 //
 // 設計参照:
@@ -1233,7 +1233,7 @@ export function CompaniesView({ saveDisabled }) {
                 onClick={() => setStatusFilter(f.id)}
                 className={"px-4 py-1.5 rounded-full text-xs border transition focus-visible:outline focus-visible:outline-2 ring-rust " +
                   (sel
-                    ? "bg-ink text-bg border-ink"
+                    ? "bg-rust text-white border-rust"
                     : "bg-bg text-ink-soft border-rule hover:text-ink hover:border-wood-deep")}
                 style={{ letterSpacing: "0.08em" }}>
                 {f.label} <span className="font-mono ml-1 opacity-70">{count}</span>
@@ -2289,15 +2289,15 @@ export function SpecComparisonView({ saveDisabled }) {
           testId="spec-no-visible-companies"
         />
       ) : (
-        <div className="overflow-x-auto border border-rule rounded-2xl bg-paper">
+        <div className="overflow-auto border border-rule rounded-2xl bg-paper" style={{ maxHeight: "calc(100vh - 180px)" }}>
           <table className="w-full text-sm" data-testid="spec-table">
             <thead>
-              <tr className="bg-paper sticky top-0">
-                <th className="border border-rule p-3 text-left sticky left-0 bg-paper min-w-[180px]" style={{ fontFamily: "var(--jp-serif)", fontWeight: 600 }}>
+              <tr>
+                <th className="border border-rule p-3 text-left bg-paper min-w-[180px] sticky top-0 left-0 z-30" style={{ fontFamily: "var(--jp-serif)", fontWeight: 600 }}>
                   項目
                 </th>
                 {visibleCompanies.map((co) => (
-                  <th key={co.id} className="border border-rule p-3 text-left min-w-[180px]" style={{ fontFamily: "var(--jp-serif)", fontWeight: 600 }}>
+                  <th key={co.id} className="border border-rule p-3 text-left min-w-[180px] bg-paper sticky top-0 z-20" style={{ fontFamily: "var(--jp-serif)", fontWeight: 600 }}>
                     {co.name}
                   </th>
                 ))}
@@ -3368,7 +3368,7 @@ export function MeetingsView({ saveDisabled }) {
             onClick={() => { setCompanyFilter("all"); setPage(1); }}
             className={"px-4 py-1.5 rounded-full text-xs border focus-visible:outline focus-visible:outline-2 ring-rust " +
               (companyFilter === "all"
-                ? "bg-ink text-bg border-ink"
+                ? "bg-rust text-white border-rust"
                 : "bg-bg text-ink-soft border-rule hover:text-ink hover:border-wood-deep")}
             style={{ letterSpacing: "0.08em" }}>
             すべての会社
@@ -3379,7 +3379,7 @@ export function MeetingsView({ saveDisabled }) {
               onClick={() => { setCompanyFilter(co.id); setPage(1); }}
               className={"px-4 py-1.5 rounded-full text-xs border focus-visible:outline focus-visible:outline-2 ring-rust " +
                 (companyFilter === co.id
-                  ? "bg-ink text-bg border-ink"
+                  ? "bg-rust text-white border-rust"
                   : "bg-bg text-ink-soft border-rule hover:text-ink hover:border-wood-deep")}
               style={{ letterSpacing: "0.08em" }}>
               {co.name}
@@ -4903,17 +4903,28 @@ function Header({ searchQuery, onSearchChange, onSettingsClick, saveDisabled, on
 
   return (
     <header className="bg-bg border-b border-rule sticky top-0 z-30 no-print">
-      <div className="max-w-7xl mx-auto px-4 py-3 flex items-center gap-4">
+      <div className="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center gap-x-4 gap-y-2.5">
         <h1 className="shrink-0 flex items-baseline gap-2">
           <span className="text-xl text-ink" style={{ fontFamily: "var(--jp-serif)", fontWeight: 600 }}>
-            注文住宅管理ツール
+            住宅会社仕様比較ツール
           </span>
           <span className="font-serif-en text-xs uppercase text-wood-deep tracking-widest hidden sm:inline">
             House Journal
           </span>
         </h1>
-        <div className="flex-1 max-w-xl hidden sm:block relative">
+        <button
+          type="button"
+          aria-label="設定"
+          data-testid="settings-button"
+          onClick={onSettingsClick}
+          className="shrink-0 ml-auto sm:ml-0 sm:order-3 flex items-center gap-1.5 px-3 py-2 rounded-full border border-rule bg-bg hover:bg-paper hover:border-wood-deep text-ink-soft hover:text-ink focus-visible:outline focus-visible:outline-2 ring-rust transition"
+        >
+          <span className="text-base leading-none" aria-hidden="true">⚙</span>
+          <span className="hidden sm:inline text-sm" style={{ letterSpacing: "0.08em" }}>設定</span>
+        </button>
+        <div className="w-full sm:w-auto sm:flex-1 sm:max-w-xl sm:order-2 relative">
           <label htmlFor="global-search" className="sr-only">全体検索</label>
+          <span aria-hidden="true" className="absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-soft pointer-events-none text-sm">🔍</span>
           <input
             id="global-search"
             type="search"
@@ -4923,7 +4934,7 @@ function Header({ searchQuery, onSearchChange, onSettingsClick, saveDisabled, on
             onFocus={() => { if (debouncedQuery.trim().length > 0) setOpen(true); }}
             placeholder="会社・打ち合わせ・仕様項目を検索"
             disabled={saveDisabled}
-            className="w-full px-4 py-2 rounded-full border border-rule text-sm bg-bg placeholder:text-ink-soft/60 focus-visible:outline focus-visible:outline-2 ring-rust disabled:bg-paper disabled:text-ink-soft/40"
+            className="w-full pl-10 pr-4 py-2 rounded-full border border-rule text-sm bg-bg placeholder:text-ink-soft/60 focus-visible:outline focus-visible:outline-2 ring-rust disabled:bg-paper disabled:text-ink-soft/40"
           />
           {open && debouncedQuery.trim().length > 0 && searchData && (
             <GlobalSearchPanel
@@ -4934,15 +4945,6 @@ function Header({ searchQuery, onSearchChange, onSettingsClick, saveDisabled, on
             />
           )}
         </div>
-        <button
-          type="button"
-          aria-label="設定"
-          data-testid="settings-button"
-          onClick={onSettingsClick}
-          className="p-2 rounded-full hover:bg-paper text-ink-soft focus-visible:outline focus-visible:outline-2 ring-rust transition"
-        >
-          ⚙
-        </button>
       </div>
     </header>
   );
@@ -4988,7 +4990,8 @@ function TabNavigation({ currentTab, onTabChange }) {
   );
 }
 
-function BottomNavigation({ currentTab, onTabChange }) {
+function BottomNavigation({ currentTab, onTabChange, onSettingsClick }) {
+  const settingsActive = currentTab === "settings";
   return (
     <nav
       className="md:hidden fixed bottom-0 inset-x-0 bg-bg border-t border-rule z-40 no-print"
@@ -4998,7 +5001,7 @@ function BottomNavigation({ currentTab, onTabChange }) {
       }}
       aria-label="モバイルナビゲーション"
     >
-      <div className="grid grid-cols-5">
+      <div className="grid grid-cols-6">
         {TABS.map((tab) => {
           const active = currentTab === tab.id;
           return (
@@ -5011,20 +5014,40 @@ function BottomNavigation({ currentTab, onTabChange }) {
               data-testid={`bottom-tab-${tab.id}`}
               onClick={() => onTabChange(tab.id)}
               className={
-                "py-2.5 flex flex-col items-center text-[11px] gap-1 focus-visible:outline focus-visible:outline-2 ring-rust transition " +
+                "py-2.5 flex flex-col items-center text-[10px] gap-1 focus-visible:outline focus-visible:outline-2 ring-rust transition " +
                 (active ? "text-rust" : "text-ink-soft hover:text-ink")
               }
               style={{
                 fontFamily: "var(--jp-serif)",
                 fontWeight: active ? 600 : 500,
-                letterSpacing: "0.06em",
+                letterSpacing: "0.04em",
               }}
             >
               <span className="text-lg" aria-hidden="true">{tab.icon}</span>
-              <span>{tab.label}</span>
+              <span className="truncate max-w-full px-0.5">{tab.label}</span>
             </button>
           );
         })}
+        <button
+          type="button"
+          role="tab"
+          aria-selected={settingsActive}
+          aria-label="設定"
+          data-testid="bottom-tab-settings"
+          onClick={onSettingsClick}
+          className={
+            "py-2.5 flex flex-col items-center text-[10px] gap-1 focus-visible:outline focus-visible:outline-2 ring-rust transition " +
+            (settingsActive ? "text-rust" : "text-ink-soft hover:text-ink")
+          }
+          style={{
+            fontFamily: "var(--jp-serif)",
+            fontWeight: settingsActive ? 600 : 500,
+            letterSpacing: "0.04em",
+          }}
+        >
+          <span className="text-lg" aria-hidden="true">⚙</span>
+          <span>設定</span>
+        </button>
       </div>
     </nav>
   );
@@ -5231,7 +5254,7 @@ function AppInner() {
         )}
       </main>
 
-      <BottomNavigation currentTab={currentTab} onTabChange={setCurrentTab} />
+      <BottomNavigation currentTab={currentTab} onTabChange={setCurrentTab} onSettingsClick={handleSettingsClick} />
     </div>
   );
 }
