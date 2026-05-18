@@ -2881,6 +2881,10 @@ export function MeetingFormModal({ initial, companies, categories, specItems, me
               + 決定事項を追加
             </button>
           </div>
+          <p className="text-xs text-wood-deep mb-3 px-3 py-2 bg-paper/60 border border-rule rounded-lg leading-relaxed"
+             data-testid="spec-reflection-hint">
+            ※ 仕様値を入力した決定事項は、保存後に詳細ページの「✅ 仕様に反映」ボタンから仕様比較タブへ反映してください（変更理由の入力と ChangeLog 記録のため）。
+          </p>
           {decisions.length === 0 ? (
             <p className="text-xs text-ink-soft text-center py-4">決定事項はまだ登録されていません</p>
           ) : (
@@ -3289,6 +3293,15 @@ export function MeetingsView({ saveDisabled }) {
       setShowForm(false);
       setEditing(null);
       showToast("success", editing ? "打ち合わせを更新しました" : "打ち合わせを登録しました");
+
+      // 仕様値入り Decision がある場合は詳細ページへ自動遷移し、
+      // ユーザーがそのまま「✅ 仕様に反映」ボタンを押せるようにする。
+      const hasReflectable = resolvedDecisions.some(
+        (d) => d.specItemId && String(d.specValue || "").trim()
+      );
+      if (hasReflectable) {
+        setDetailMeeting(newMeeting);
+      }
     } catch (e) {
       console.error(e);
     }
