@@ -1907,7 +1907,7 @@ function SpecRow({ specItem, companies, notesByCompany, onCellEdit, onNoteEdit, 
       <th className="border border-rule bg-paper text-left align-top p-2 sticky left-0 overflow-hidden" scope="row">
         <div className="flex items-start gap-1">
           <div className="flex-1 min-w-0">
-            <div className="text-sm text-ink truncate" data-testid={`spec-item-name-${specItem.id}`}>{specItem.name}</div>
+            <div className="text-sm text-ink break-words" data-testid={`spec-item-name-${specItem.id}`}>{specItem.name}</div>
           </div>
           <div className="flex flex-col gap-0.5 no-print">
             <button type="button" data-testid={`spec-item-move-up-${specItem.id}`}
