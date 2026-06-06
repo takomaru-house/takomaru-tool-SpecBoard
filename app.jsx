@@ -150,16 +150,28 @@ const StorageError = {
 };
 
 const DEFAULT_TEMPLATE = [
+  { category: "コスト",
+    items: ["坪単価", "本体工事費", "付帯工事費（地盤改良・外構等）", "諸経費", "標準総額目安", "値引き条件"] },
+  { category: "設計・間取り",
+    items: ["自由設計の範囲", "設計士の専任", "打合せ回数", "設計料", "平屋・2階・3階対応"] },
   { category: "断熱",
-    items: ["断熱工法", "断熱材の種類", "断熱等性能等級（UA値）", "床断熱材"] },
+    items: ["断熱工法", "断熱材の種類", "床断熱材", "壁断熱材", "天井・屋根断熱材", "断熱等性能等級（UA値）", "C値（気密性能）"] },
+  { category: "省エネ・環境",
+    items: ["一次エネルギー消費量等級", "ZEH対応", "換気方式", "太陽光発電（kW）", "蓄電池"] },
   { category: "開口部（窓）",
     items: ["サッシの種類", "ガラスの種類", "玄関ドアの種類"] },
   { category: "構造",
-    items: ["工法", "耐震等級", "基礎の種類", "地盤保証"] },
+    items: ["工法", "耐震等級", "制震装置", "基礎の種類", "地盤保証", "シロアリ保証"] },
   { category: "設備（水回り）",
-    items: ["キッチン", "浴室", "洗面台", "トイレ"] },
+    items: ["キッチン", "浴室", "洗面台", "トイレ", "給湯器", "食洗機"] },
+  { category: "空調・電気",
+    items: ["床暖房", "全館空調", "エアコン標準台数", "コンセント・LAN配線"] },
+  { category: "外装・内装",
+    items: ["外壁材", "屋根材", "床材", "天井高", "標準収納"] },
   { category: "保証・アフターサービス",
-    items: ["初期保証年数", "長期保証の条件", "定期点検の頻度"] },
+    items: ["初期保証年数", "長期保証の条件", "構造躯体保証", "防水保証", "設備保証", "定期点検の頻度"] },
+  { category: "会社情報",
+    items: ["創業年", "施工棟数", "住宅完成保証", "モデルハウス所在地", "引渡しまでの期間"] },
 ];
 
 const TABS = [
@@ -394,6 +406,73 @@ async function initializeDefaultTemplateIfEmpty() {
   await storage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify(newCategories));
   await storage.setItem(STORAGE_KEYS.SPEC_ITEMS, JSON.stringify(newSpecItems));
   return true;
+}
+
+// 既存ユーザーが DEFAULT_TEMPLATE の差分（後から追加されたカテゴリ／項目）を取り込むための関数。
+// - 既存カテゴリは normalizedName で同定し、無ければ新規追加
+// - 既存項目は同カテゴリ内の name（trim 一致）で同定し、無ければ末尾に追加
+// - 削除済み（deletedAt 付き）の項目／カテゴリは「未存在」とみなして新規作成する
+async function fillMissingDefaultTemplate() {
+  const existingCategories = await loadEntities(STORAGE_KEYS.CATEGORIES);
+  const existingSpecItems  = await loadEntities(STORAGE_KEYS.SPEC_ITEMS);
+
+  const activeCategoryByNorm = new Map();
+  for (const c of existingCategories) {
+    if (!c.deletedAt) activeCategoryByNorm.set(c.normalizedName, c);
+  }
+
+  const now = new Date().toISOString();
+  const nextCategories = [...existingCategories];
+  const nextSpecItems  = [...existingSpecItems];
+  let nextCatSortOrder = nextCategories.reduce((m, c) => Math.max(m, c.sortOrder ?? 0), -1) + 1;
+  let addedCategories = 0;
+  let addedItems = 0;
+
+  for (const tmpl of DEFAULT_TEMPLATE) {
+    const normName = tmpl.category.trim().toLowerCase();
+    let cat = activeCategoryByNorm.get(normName);
+    if (!cat) {
+      cat = {
+        id: newId(),
+        name: tmpl.category,
+        normalizedName: normName,
+        sortOrder: nextCatSortOrder++,
+        isDefault: true,
+        createdAt: now,
+      };
+      nextCategories.push(cat);
+      activeCategoryByNorm.set(normName, cat);
+      addedCategories++;
+    }
+    const activeItemNames = new Set(
+      nextSpecItems
+        .filter((i) => i.categoryId === cat.id && !i.deletedAt)
+        .map((i) => i.name.trim())
+    );
+    let itemSortOrder = nextSpecItems
+      .filter((i) => i.categoryId === cat.id)
+      .reduce((m, i) => Math.max(m, i.sortOrder ?? 0), -1) + 1;
+    for (const itemName of tmpl.items) {
+      if (activeItemNames.has(itemName.trim())) continue;
+      nextSpecItems.push({
+        id: newId(),
+        categoryId: cat.id,
+        name: itemName,
+        sortOrder: itemSortOrder++,
+        values: [],
+        createdAt: now,
+      });
+      addedItems++;
+    }
+  }
+
+  if (addedCategories === 0 && addedItems === 0) {
+    return { addedCategories: 0, addedItems: 0 };
+  }
+
+  await storage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify(nextCategories));
+  await storage.setItem(STORAGE_KEYS.SPEC_ITEMS, JSON.stringify(nextSpecItems));
+  return { addedCategories, addedItems };
 }
 
 // ===== 3. 共通UIコンポーネント =====
@@ -4714,6 +4793,26 @@ export function SettingsView({ saveDisabled, onClose }) {
     }
   };
 
+  const handleFillMissingTemplate = async () => {
+    const ok = await showConfirm(
+      "不足している標準カテゴリ・項目を追加しますか？",
+      "既存のカテゴリ・項目（同名）はそのまま維持し、不足分のみ末尾に追加します。既存データは変更されません。"
+    );
+    if (!ok) return;
+    try {
+      const { addedCategories, addedItems } = await fillMissingDefaultTemplate();
+      if (addedCategories === 0 && addedItems === 0) {
+        showToast("info", "追加が必要なカテゴリ・項目はありません");
+      } else {
+        showToast("success", `カテゴリ ${addedCategories} 件 / 項目 ${addedItems} 件を追加しました`);
+        await reload();
+      }
+    } catch (e) {
+      console.error(e);
+      showToast("error", "標準カテゴリの追加に失敗しました");
+    }
+  };
+
   if (!usage || !archived) return <Spinner label="設定を読み込み中..." />;
 
   return (
@@ -4829,6 +4928,25 @@ export function SettingsView({ saveDisabled, onClose }) {
             </button>
             <p className="text-[11px] text-ink-soft mt-2">
               現在のタブの内容を @media print 形式で印刷します
+            </p>
+          </div>
+
+          {/* 標準テンプレート補填 */}
+          <div className="bg-paper border border-rule rounded-2xl p-5" data-testid="fill-template-card">
+            <h3 className="text-base text-ink mb-1" style={{ fontFamily: "var(--jp-serif)", fontWeight: 600 }}>
+              標準テンプレート
+            </h3>
+            <p className="font-serif-en text-[10px] uppercase tracking-widest text-wood-deep mb-3">
+              Default Template
+            </p>
+            <button type="button" onClick={handleFillMissingTemplate}
+              data-testid="fill-missing-template-button"
+              disabled={saveDisabled}
+              className="px-4 py-2 rounded-full border border-rule text-sm text-ink hover:bg-rule/40 disabled:opacity-40 disabled:cursor-not-allowed">
+              📋 不足カテゴリ・項目を追加
+            </button>
+            <p className="text-[11px] text-ink-soft mt-2">
+              標準テンプレートのうち、未登録のカテゴリ・項目だけを末尾に追加します。既存データは変更されません。
             </p>
           </div>
         </div>
