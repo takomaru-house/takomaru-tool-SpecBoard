@@ -264,6 +264,19 @@ async function saveMeta(meta) {
   await storage.setItem(STORAGE_KEYS.META, JSON.stringify(meta));
 }
 
+// オンボーディング完了フラグ。META に onboardingCompletedAt (ISO文字列) を保持する。
+// 未設定 = 未完了。設定済 = その日時に「使い方ガイドを最後まで見た or スキップした」。
+async function markOnboardingCompleted() {
+  const meta = await loadMeta();
+  await saveMeta({ ...meta, onboardingCompletedAt: new Date().toISOString() });
+}
+
+async function resetOnboarding() {
+  const meta = await loadMeta();
+  const { onboardingCompletedAt: _omit, ...rest } = meta;
+  await saveMeta(rest);
+}
+
 async function loadEntities(key) {
   const raw = await storage.getItem(key);
   if (!raw) return [];
@@ -689,6 +702,263 @@ function EmptyState({ icon, title, description, action, testId }) {
           {action.label}
         </button>
       )}
+    </div>
+  );
+}
+
+// --- Onboarding (初回起動時の使い方ガイド) ---
+
+// CLAUDE.md 設計トーン (和モダン・暖色アースカラー) に合わせた 5 ステップ構成。
+// 表示条件: META.onboardingCompletedAt が未設定 (初回起動 or 設定からリセット)。
+// 完了/スキップで onboardingCompletedAt をセットし、以後自動表示しない。
+const ONBOARDING_STEPS = [
+  {
+    id: "welcome",
+    eyebrow: "Welcome",
+    title: "ようこそ",
+    body:
+      "「住宅会社仕様比較ツール」は、注文住宅を検討するなかで複数の住宅会社を" +
+      "公平に比較し、打ち合わせの記録から決定事項までを一つにまとめるためのブラウザツールです。",
+    bullets: [
+      { icon: "📋", text: "各社の仕様・性能・見積を一覧で比較できます" },
+      { icon: "📅", text: "打ち合わせと決定事項を時系列で残せます" },
+      { icon: "✓",  text: "決定事項をそのまま仕様比較表へ反映できます" },
+    ],
+  },
+  {
+    id: "workflow",
+    eyebrow: "Workflow",
+    title: "基本のフロー",
+    body: "下のサイクルを回すだけで、家づくりの記録と判断材料が自然に蓄積されていきます。",
+    flow: [
+      { num: "1", label: "会社を登録", caption: "ハウスメーカー・工務店" },
+      { num: "2", label: "打ち合わせを記録", caption: "議事録 + 決定事項" },
+      { num: "3", label: "仕様へ反映", caption: "決定事項をワンクリック" },
+      { num: "4", label: "比較・判断", caption: "各社を横並びで検討" },
+    ],
+  },
+  {
+    id: "tabs",
+    eyebrow: "Tabs",
+    title: "5つのタブの役割",
+    tabs: [
+      { icon: "🏠", name: "ダッシュボード", text: "全体のサマリーと未確定事項の一覧" },
+      { icon: "🏢", name: "会社管理",       text: "ハウスメーカー・工務店の登録と編集" },
+      { icon: "📋", name: "仕様比較",       text: "各社の仕様値を表で比較・編集" },
+      { icon: "📅", name: "打ち合わせ",     text: "議事録と決定事項。仕様への反映もここから" },
+      { icon: "📜", name: "変更ログ",       text: "仕様値の変更履歴（改ざん防止のため削除不可）" },
+    ],
+  },
+  {
+    id: "notes",
+    eyebrow: "Important",
+    title: "大事なポイント",
+    notes: [
+      { icon: "💾", title: "データはこのブラウザに保存されます",
+        text: "サーバーには送信されません。端末・ブラウザを変えると引き継げないため、" +
+              "別端末で開く場合は JSON エクスポート/インポートで移行してください。" },
+      { icon: "📥", title: "バックアップは「設定」から",
+        text: "50回保存ごとに JSON エクスポートの目安をお知らせします。" +
+              "重要な決定の前後にも手動エクスポートをおすすめします。" },
+      { icon: "📋", title: "標準テンプレートが既に入っています",
+        text: "11カテゴリ58項目の仕様テンプレートを初期登録済み。" +
+              "「仕様比較」タブですぐに各社の値を入力できます。" },
+      { icon: "🔒", title: "変更ログは削除できません",
+        text: "「言った・言わない」を残さず追えるよう、変更履歴は記録の信頼性のため削除不可です。" },
+    ],
+  },
+  {
+    id: "cta",
+    eyebrow: "Get Started",
+    title: "準備ができました",
+    body:
+      "まずは検討中の住宅会社を 1 社登録するところから始めましょう。" +
+      "あとからいつでも「設定」画面から、この使い方ガイドを開き直せます。",
+    bullets: [
+      { icon: "🏢", text: "「会社を登録する」で 1 社追加" },
+      { icon: "📅", text: "次の打ち合わせを記録" },
+      { icon: "📋", text: "決定したことを仕様に反映" },
+    ],
+  },
+];
+
+function OnboardingModal({ onClose, onPrimaryAction }) {
+  const [stepIndex, setStepIndex] = useState(0);
+  const titleId = useMemo(() => `onboarding-title-${Math.random().toString(36).slice(2, 8)}`, []);
+  const dialogRef = useRef(null);
+
+  const total = ONBOARDING_STEPS.length;
+  const step = ONBOARDING_STEPS[stepIndex];
+  const isLast = stepIndex === total - 1;
+
+  useEffect(() => { dialogRef.current?.focus(); }, [stepIndex]);
+
+  const handleNext = () => {
+    if (isLast) {
+      onPrimaryAction?.();
+    } else {
+      setStepIndex((i) => Math.min(i + 1, total - 1));
+    }
+  };
+  const handleBack = () => setStepIndex((i) => Math.max(i - 1, 0));
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 no-print"
+      style={{ background: "rgba(26,24,22,0.55)" }}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      data-testid="onboarding-modal"
+      onKeyDown={(e) => { if (e.key === "Escape") onClose?.(); }}
+    >
+      <div
+        ref={dialogRef}
+        tabIndex={-1}
+        className="bg-bg rounded-2xl w-full max-w-2xl max-h-[90vh] flex flex-col focus:outline-none"
+        style={{ boxShadow: "0 16px 48px rgba(26,24,22,0.22)", border: "1px solid var(--rule)" }}
+      >
+        {/* Header */}
+        <div className="px-7 pt-6 pb-4 border-b border-rule flex items-start justify-between gap-3">
+          <div>
+            <p className="font-serif-en text-[10px] uppercase tracking-widest text-wood-deep">
+              {step.eyebrow} · {stepIndex + 1} / {total}
+            </p>
+            <h2
+              id={titleId}
+              data-testid="onboarding-title"
+              className="mt-1 text-xl text-ink"
+              style={{ fontFamily: "var(--jp-serif)", fontWeight: 600 }}
+            >
+              {step.title}
+            </h2>
+          </div>
+          <button
+            type="button"
+            data-testid="onboarding-skip-button"
+            onClick={onClose}
+            className="text-xs text-ink-soft hover:text-ink px-3 py-1 rounded-full border border-rule hover:bg-paper transition focus-visible:outline focus-visible:outline-2 ring-rust"
+          >
+            スキップ
+          </button>
+        </div>
+
+        {/* Body (scrollable) */}
+        <div className="px-7 py-6 overflow-y-auto" data-testid="onboarding-body">
+          {step.body && (
+            <p className="text-sm text-ink-soft leading-relaxed">{step.body}</p>
+          )}
+
+          {/* Bullets list */}
+          {step.bullets && (
+            <ul className="mt-5 space-y-2.5">
+              {step.bullets.map((b, i) => (
+                <li key={i} className="flex items-start gap-3 bg-paper border border-rule rounded-xl px-4 py-2.5">
+                  <span className="text-base leading-relaxed" aria-hidden="true">{b.icon}</span>
+                  <span className="text-sm text-ink leading-relaxed">{b.text}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {/* Workflow flow */}
+          {step.flow && (
+            <ol className="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-3" data-testid="onboarding-flow">
+              {step.flow.map((f, i) => (
+                <li
+                  key={f.num}
+                  className="bg-paper border border-rule rounded-xl px-4 py-3 flex items-center gap-3"
+                >
+                  <span
+                    className="shrink-0 w-9 h-9 rounded-full bg-rust text-white flex items-center justify-center font-serif-en text-sm"
+                    aria-hidden="true"
+                  >
+                    {f.num}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-sm text-ink" style={{ fontFamily: "var(--jp-serif)", fontWeight: 600 }}>
+                      {f.label}
+                    </p>
+                    <p className="text-[11px] text-ink-soft mt-0.5">{f.caption}</p>
+                  </div>
+                  {i < step.flow.length - 1 && (
+                    <span className="ml-auto text-wood-deep text-lg hidden sm:inline" aria-hidden="true">→</span>
+                  )}
+                </li>
+              ))}
+            </ol>
+          )}
+
+          {/* Tabs description */}
+          {step.tabs && (
+            <ul className="mt-2 space-y-2" data-testid="onboarding-tabs">
+              {step.tabs.map((t) => (
+                <li key={t.name} className="flex items-start gap-3 bg-paper border border-rule rounded-xl px-4 py-3">
+                  <span className="text-xl leading-none mt-0.5" aria-hidden="true">{t.icon}</span>
+                  <div className="min-w-0">
+                    <p className="text-sm text-ink" style={{ fontFamily: "var(--jp-serif)", fontWeight: 600 }}>
+                      {t.name}
+                    </p>
+                    <p className="text-xs text-ink-soft mt-0.5 leading-relaxed">{t.text}</p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {/* Important notes */}
+          {step.notes && (
+            <ul className="mt-2 space-y-3" data-testid="onboarding-notes">
+              {step.notes.map((n, i) => (
+                <li key={i} className="bg-paper border border-rule rounded-xl p-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-base" aria-hidden="true">{n.icon}</span>
+                    <p className="text-sm text-ink" style={{ fontFamily: "var(--jp-serif)", fontWeight: 600 }}>
+                      {n.title}
+                    </p>
+                  </div>
+                  <p className="text-xs text-ink-soft mt-2 leading-relaxed">{n.text}</p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        {/* Progress dots */}
+        <div className="px-7 pb-3 flex items-center justify-center gap-2" aria-hidden="true">
+          {ONBOARDING_STEPS.map((s, i) => (
+            <span
+              key={s.id}
+              className="block h-1.5 rounded-full transition-all"
+              style={{
+                width: i === stepIndex ? "20px" : "8px",
+                background: i === stepIndex ? "var(--rust)" : "var(--rule)",
+              }}
+            />
+          ))}
+        </div>
+
+        {/* Footer actions */}
+        <div className="px-7 pb-6 pt-2 flex items-center justify-between gap-3">
+          <button
+            type="button"
+            data-testid="onboarding-back-button"
+            onClick={handleBack}
+            disabled={stepIndex === 0}
+            className="px-4 py-2 rounded-full border border-rule text-sm text-ink-soft hover:text-ink hover:bg-paper disabled:opacity-30 disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 ring-rust transition"
+          >
+            ← 戻る
+          </button>
+          <button
+            type="button"
+            data-testid={isLast ? "onboarding-start-button" : "onboarding-next-button"}
+            onClick={handleNext}
+            className="px-6 py-2 rounded-full bg-rust text-white text-sm hover:opacity-90 focus-visible:outline focus-visible:outline-2 ring-rust transition"
+          >
+            {isLast ? "会社を登録する →" : "次へ →"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -4679,7 +4949,7 @@ function ArchiveSection({ title, entries, renderItem, testIdPrefix }) {
 
 // ---- 設定ビュー ----
 
-export function SettingsView({ saveDisabled, onClose }) {
+export function SettingsView({ saveDisabled, onClose, onOpenOnboarding }) {
   const showToast = useToast();
   const showConfirm = useConfirm();
 
@@ -4949,6 +5219,27 @@ export function SettingsView({ saveDisabled, onClose }) {
               標準テンプレートのうち、未登録のカテゴリ・項目だけを末尾に追加します。既存データは変更されません。
             </p>
           </div>
+
+          {/* 使い方ガイド (オンボーディング再表示) */}
+          {onOpenOnboarding && (
+            <div className="bg-paper border border-rule rounded-2xl p-5" data-testid="onboarding-help-card">
+              <h3 className="text-base text-ink mb-1" style={{ fontFamily: "var(--jp-serif)", fontWeight: 600 }}>
+                使い方ガイド
+              </h3>
+              <p className="font-serif-en text-[10px] uppercase tracking-widest text-wood-deep mb-3">
+                Onboarding
+              </p>
+              <button type="button" onClick={onOpenOnboarding}
+                data-testid="open-onboarding-button"
+                disabled={saveDisabled}
+                className="px-4 py-2 rounded-full border border-rule text-sm text-ink hover:bg-rule/40 disabled:opacity-40 disabled:cursor-not-allowed">
+                📖 使い方ガイドを開く
+              </button>
+              <p className="text-[11px] text-ink-soft mt-2">
+                初回起動時の使い方ガイドをもう一度表示します。
+              </p>
+            </div>
+          )}
         </div>
       </div>
 
@@ -5312,6 +5603,7 @@ function AppInner() {
   const [resolvedStorageMode, setResolvedStorageMode] = useState(null);
   const [currentTab, setCurrentTab] = useState("dashboard");
   const [searchQuery, setSearchQuery] = useState("");
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
   // 起動シーケンス
   useEffect(() => {
@@ -5339,6 +5631,11 @@ function AppInner() {
         if (cancelled) return;
         if (seeded) showToast("success", "標準仕様テンプレートを読み込みました");
 
+        // 初回起動時のみオンボーディングを表示。書き込み不能モードでは出さない。
+        const meta = await loadMeta();
+        if (cancelled) return;
+        if (!meta.onboardingCompletedAt) setShowOnboarding(true);
+
         setBootPhase(null);
       } catch (e) {
         console.error("初期化失敗:", e);
@@ -5350,6 +5647,24 @@ function AppInner() {
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleOnboardingClose = useCallback(async () => {
+    setShowOnboarding(false);
+    try { await markOnboardingCompleted(); }
+    catch (e) { console.error("オンボーディング完了状態の保存に失敗:", e); }
+  }, []);
+
+  const handleOnboardingStart = useCallback(async () => {
+    setShowOnboarding(false);
+    try { await markOnboardingCompleted(); }
+    catch (e) { console.error("オンボーディング完了状態の保存に失敗:", e); }
+    setCurrentTab("companies");
+  }, []);
+
+  const handleOpenOnboarding = useCallback(async () => {
+    try { await resetOnboarding(); } catch (e) { console.error(e); }
+    setShowOnboarding(true);
   }, []);
 
   const [previousTab, setPreviousTab] = useState("dashboard");
@@ -5392,7 +5707,11 @@ function AppInner() {
         {currentTab === "meetings" && <MeetingsView saveDisabled={saveDisabled} />}
         {currentTab === "change-logs" && <ChangeLogsView />}
         {currentTab === "settings" && (
-          <SettingsView saveDisabled={saveDisabled} onClose={handleSettingsClose} />
+          <SettingsView
+            saveDisabled={saveDisabled}
+            onClose={handleSettingsClose}
+            onOpenOnboarding={handleOpenOnboarding}
+          />
         )}
         {currentTab !== "dashboard" && currentTab !== "companies"
           && currentTab !== "spec-comparison" && currentTab !== "meetings"
@@ -5402,6 +5721,13 @@ function AppInner() {
       </main>
 
       <BottomNavigation currentTab={currentTab} onTabChange={setCurrentTab} onSettingsClick={handleSettingsClick} />
+
+      {showOnboarding && !saveDisabled && (
+        <OnboardingModal
+          onClose={handleOnboardingClose}
+          onPrimaryAction={handleOnboardingStart}
+        />
+      )}
     </div>
   );
 }
